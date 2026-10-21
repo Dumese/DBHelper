@@ -80,7 +80,7 @@ fn wizard<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
             if w.step > 0 {
                 kit::ghost(ctx, "上一步", Msg::WizardStep(-1))
             } else {
-                kit::ghost(ctx, "使用高级配置", Msg::Noop)
+                kit::gap(1.0, 1.0)
             },
             kit::hspace(),
             kit::secondary(ctx, "取消", Msg::WizardClose),

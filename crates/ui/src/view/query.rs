@@ -22,6 +22,8 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
             kit::primary_with_hint(ctx, Icon::Play, run_label, "F5", Msg::QueryRun),
             kit::secondary(ctx, "停止", Msg::QueryStop),
             kit::secondary(ctx, "格式化", Msg::QueryFormat),
+            kit::secondary(ctx, "补全", Msg::CompletionShow),
+            kit::secondary(ctx, "执行计划", Msg::ExplainRun),
             kit::secondary(ctx, "保存", Msg::QuerySave),
         ]
         .spacing(8)
@@ -33,6 +35,27 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         border: Border { color: t.hairline, width: 1.0, radius: 0.0.into() },
         ..Default::default()
     });
+
+    // 实时诊断条：括号/引号/高危语句
+    let diag_bar: Element<Msg> = if app.diagnostics.is_empty() {
+        container(kit::txt(ctx, "✓ 语法检查通过", ts::MICRO, t.text_tertiary))
+            .padding(Padding { top: 4.0, right: 12.0, bottom: 4.0, left: 12.0 })
+            .width(Length::Fill)
+            .into()
+    } else {
+        let mut col = column![].spacing(2);
+        for d in &app.diagnostics {
+            col = col.push(kit::txt(ctx, format!("第 {} 行：{}", d.line + 1, d.message), ts::MICRO, t.error));
+        }
+        container(col)
+            .padding(Padding { top: 4.0, right: 12.0, bottom: 4.0, left: 12.0 })
+            .width(Length::Fill)
+            .style(move |_: &Theme| container::Style {
+                background: Some(t.error_soft.into()),
+                ..Default::default()
+            })
+            .into()
+    };
 
     let editor = scrollable(
         container(Editor::new(&tab.sql, tab.caret, tab.anchor, ctx, Msg::EditorClick)
@@ -46,14 +69,50 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     .height(Length::FillPortion(2))
     .style(crate::view::shell::scroll_style(ctx));
 
+    // 补全弹层：覆盖在编辑区上方
+    let editor_stack: Element<Msg> = if app.completion.visible {
+        let mut list = column![].spacing(1);
+        for (i, item) in app.completion.items.iter().enumerate() {
+            let active = i == app.completion.selected;
+            list = list.push(
+                iced::widget::mouse_area(
+                    container(
+                        kit::mono(ctx, item.clone(), ts::SMALL, if active { t.text } else { t.text_secondary }),
+                    )
+                    .padding(Padding { top: 3.0, right: 10.0, bottom: 3.0, left: 10.0 })
+                    .width(Length::Fill)
+                    .style(move |_: &Theme| container::Style {
+                        background: Some(if active { t.accent_soft } else { t.bg }.into()),
+                        ..Default::default()
+                    }),
+                )
+                .on_press(Msg::CompletionPick(i)),
+            );
+        }
+        iced::widget::stack![
+            editor,
+            container(list)
+                .width(Length::Fixed(280.0))
+                .style(move |_: &Theme| container::Style {
+                    background: Some(t.bg.into()),
+                    border: Border { color: t.hairline_strong, width: 1.0, radius: radius::SM.into() },
+                    ..Default::default()
+                }),
+        ]
+        .into()
+    } else {
+        editor.into()
+    };
+
     let results = results_panel(app, tab, ctx);
 
     column![
         toolbar,
-        container(editor).width(Length::Fill).height(Length::FillPortion(2)).style(move |_: &Theme| container::Style {
+        container(editor_stack).width(Length::Fill).height(Length::FillPortion(2)).style(move |_: &Theme| container::Style {
             background: Some(t.bg.into()),
             ..Default::default()
         }),
+        diag_bar,
         container(Space::new().width(Length::Fill).height(Length::Fixed(1.0))).width(Length::Fill).style(move |_: &Theme| container::Style {
             background: Some(t.hairline.into()),
             ..Default::default()
@@ -234,16 +293,48 @@ fn messages<'a>(tab: &'a crate::state::QueryTab, ctx: Ctx) -> Element<'a, Msg> {
 fn plan<'a>(app: &'a App, tab: &'a crate::state::QueryTab, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
     let mut col = column![].spacing(6).padding(Padding { top: 10.0, right: 14.0, bottom: 10.0, left: 14.0 });
-    col = col.push(kit::txt(
-        ctx,
-        "执行计划由引擎解析后返回；点击下方按钮可对当前语句执行 EXPLAIN。",
-        ts::SMALL,
-        t.text_secondary,
-    ));
-    col = col.push(kit::secondary(ctx, "生成执行计划", Msg::QueryRun));
-    if let Some(core) = &app.core {
-        let _ = core;
+
+    if tab.plan_columns.is_empty() {
+        col = col.push(kit::txt(
+            ctx,
+            "执行计划由引擎解析后返回；点击下方按钮对当前语句执行 EXPLAIN。",
+            ts::SMALL,
+            t.text_secondary,
+        ));
+        col = col.push(kit::secondary(ctx, "生成执行计划", Msg::ExplainRun));
+        return scrollable(col).height(Length::Fill).style(crate::view::shell::scroll_style(ctx)).into();
     }
-    let _ = tab;
+
+    // 计划树形表格
+    let mut head = row![].spacing(8);
+    for c in &tab.plan_columns {
+        head = head.push(
+            container(kit::txt(ctx, c.clone(), ts::MICRO, t.text_secondary))
+                .width(Length::FillPortion(1)),
+        );
+    }
+    let mut body = column![].spacing(3);
+    for r in &tab.plan_rows {
+        let mut line = row![].spacing(8);
+        for (i, cell) in r.iter().enumerate() {
+            line = line.push(
+                container(kit::mono(ctx, cell.clone(), ts::MICRO, t.text))
+                    .width(Length::FillPortion(1)),
+            );
+            let _ = i;
+        }
+        body = body.push(line);
+    }
+    col = col.push(
+        container(column![head, body].spacing(6))
+            .padding(10)
+            .width(Length::Fill)
+            .style(move |_: &Theme| container::Style {
+                background: Some(t.soft.into()),
+                border: Border { color: t.hairline, width: 1.0, radius: radius::SM.into() },
+                ..Default::default()
+            }),
+    );
+    col = col.push(kit::secondary(ctx, "重新生成", Msg::ExplainRun));
     scrollable(col).height(Length::Fill).style(crate::view::shell::scroll_style(ctx)).into()
 }

@@ -433,4 +433,97 @@ impl AppCore {
             None
         }
     }
+
+    /// 可视化执行计划：委托驱动 EXPLAIN，返回结构化结果集。
+    pub async fn explain(self: &Arc<Self>, conn_id: ConnId, sql: String) -> CoreResult<QueryOutcome> {
+        let handle = self.ensure_connected(conn_id).await?;
+        match handle {
+            Handle::Rel(driver) => driver.explain(&sql).await.map_err(|e| CoreError::Message(e.user_message())),
+            _ => Err(CoreError::Message("该连接类型不支持执行计划".into())),
+        }
+    }
+
+    /// 读取表 DDL（对象设计器「DDL 预览」用）。
+    pub async fn table_ddl(self: &Arc<Self>, conn_id: ConnId, table: String) -> CoreResult<String> {
+        let handle = self.ensure_connected(conn_id).await?;
+        match handle {
+            Handle::Rel(driver) => driver.ddl(None, &table).await.map_err(|e| CoreError::Message(e.user_message())),
+            _ => Err(CoreError::Message("该连接类型不支持 DDL 读取".into())),
+        }
+    }
+
+    /// 获取表结构（对象设计器加载/对比用）。
+    pub async fn describe_table(self: &Arc<Self>, conn_id: ConnId, table: String) -> CoreResult<TableDef> {
+        let handle = self.ensure_connected(conn_id).await?;
+        match handle {
+            Handle::Rel(driver) => driver.describe_table(None, &table).await.map_err(|e| CoreError::Message(e.user_message())),
+            _ => Err(CoreError::Message("该连接类型不支持表结构读取".into())),
+        }
+    }
+
+    /// 对象设计器保存：把 TableDef 转成 DDL 并执行。
+    /// 新表走 `create_table_ddl`；已有表先尝试 ALTER 语句集，失败时给出可复制的 DDL。
+    pub async fn def_save_table(
+        self: &Arc<Self>,
+        conn_id: ConnId,
+        def: TableDef,
+        original: Option<TableDef>,
+    ) -> CoreResult<String> {
+        let handle = self.ensure_connected(conn_id).await?;
+        let Handle::Rel(driver) = handle else {
+            return Err(CoreError::Message("该连接类型不支持表设计".into()));
+        };
+        let timeout = Duration::from_secs(30);
+        match original {
+            None => {
+                let ddl = driver.create_table_ddl(&def, None).await.map_err(|e| CoreError::Message(e.user_message()))?;
+                driver.execute(&ddl, timeout).await.map_err(|e| CoreError::Message(e.user_message()))?;
+                Ok(ddl)
+            }
+            Some(old) => {
+                let stmts = dbhelper_utils::sql::alter_table_plan(driver.kind(), &old, &def);
+                if stmts.is_empty() {
+                    return Ok(String::new());
+                }
+                let mut all = String::new();
+                for stmt in &stmts {
+                    driver.execute(stmt, timeout).await.map_err(|e| CoreError::Message(e.user_message()))?;
+                    all.push_str(stmt);
+                    all.push_str(";\n");
+                }
+                Ok(all)
+            }
+        }
+    }
+
+    /// 批量导入：文件行数据经参数化写入（无 SQL 拼接）。返回写入行数。
+    pub async fn import_rows(
+        self: &Arc<Self>,
+        conn_id: ConnId,
+        table: String,
+        columns: Vec<String>,
+        rows: Vec<Row>,
+    ) -> CoreResult<u64> {
+        let handle = self.ensure_connected(conn_id).await?;
+        let Handle::Rel(driver) = handle else {
+            return Err(CoreError::Message("该连接类型不支持数据导入".into()));
+        };
+        if let Some(writer) = driver.writer() {
+            return writer.insert_rows(&table, &columns, &rows).await.map_err(|e| CoreError::Message(e.user_message()));
+        }
+        Err(CoreError::Message("该驱动暂不支持参数化批量写入".into()))
+    }
+
+    // -----------------------------------------------------------------------
+    // 服务器管理
+    // -----------------------------------------------------------------------
+
+    /// 通用查询型管理接口：结果集原样返回（用户权限 / 模式分析 / 命令监控等）。
+    pub async fn admin_query(self: &Arc<Self>, conn_id: ConnId, sql: String) -> CoreResult<QueryOutcome> {
+        let handle = self.ensure_connected(conn_id).await?;
+        match handle {
+            Handle::Rel(driver) => driver.query(&sql, 1000, Duration::from_secs(30)).await.map_err(|e| CoreError::Message(e.user_message())),
+            _ => Err(CoreError::Message("该连接类型不支持管理查询".into())),
+        }
+    }
 }

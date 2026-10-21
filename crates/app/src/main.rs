@@ -9,6 +9,12 @@ use dbhelper_ui::App;
 use iced::window;
 use iced::Size;
 
+/// 内嵌字体：不依赖系统安装，切换字体立即生效。
+/// 三套字体均为可变字体（wght 轴），cosmic-text 会按请求字重设定轴值。
+const FONT_NOTO_SANS_SC: &[u8] = include_bytes!("../assets/fonts/NotoSansSC.ttf");
+const FONT_NOTO_SERIF_SC: &[u8] = include_bytes!("../assets/fonts/NotoSerifSC.ttf");
+const FONT_JETBRAINS_MONO: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono.ttf");
+
 /// 从内嵌的 Logo PNG 解码窗口图标（任务栏 / 标题栏 / Alt-Tab）。
 fn window_icon() -> Option<window::icon::Icon> {
     const FOX_PNG: &[u8] = include_bytes!("../assets/fox_logo.png");
@@ -26,6 +32,9 @@ fn main() -> iced::Result {
 
     iced::application(App::boot, App::update, view)
         .title("DBHelper")
+        .font(FONT_NOTO_SANS_SC)
+        .font(FONT_NOTO_SERIF_SC)
+        .font(FONT_JETBRAINS_MONO)
         .window(window::Settings {
             size: Size::new(1440.0, 900.0),
             min_size: Some(Size::new(1200.0, 760.0)),

@@ -3,6 +3,7 @@
 pub mod data;
 pub mod dialogs;
 pub mod er;
+pub mod features;
 pub mod nosql;
 pub mod query;
 pub mod settings;
@@ -54,6 +55,10 @@ fn view_inner(app: &App) -> Element<Msg> {
         Page::Redis | Page::Mongo | Page::Es => nosql::view(app, ctx),
         Page::Monitor => er::monitor_view(app, ctx),
         Page::Settings => settings::view(app, ctx),
+        Page::Designer => features::designer_view(app, ctx),
+        Page::Dash => features::dash_view(app, ctx),
+        Page::Transfer => features::transfer_view(app, ctx),
+        Page::Admin => features::admin_view(app, ctx),
     };
 
     let show_tabs = !matches!(app.page, Page::Connections);
@@ -177,7 +182,6 @@ fn wizard_card<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         ),
         Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(14.0)),
         row![
-            kit::link(ctx, "使用高级配置", Msg::WizardStart),
             kit::hspace(),
             kit::secondary(ctx, "取消", Msg::Noop),
             kit::primary(ctx, "下一步", Msg::WizardStart),

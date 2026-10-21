@@ -722,6 +722,108 @@ pub fn statement_ranges(sql: &str) -> Vec<Range<usize>> {
     out
 }
 
+/// 对象设计器：对比新旧表结构，生成方言对应的 ALTER 语句集。
+///
+/// 覆盖三类变更：加列 / 删列 / 改列（类型、可空、默认值）。
+/// SQLite 仅支持 ADD/DROP COLUMN，修改列会跳过并在设计器中提示重建表。
+pub fn alter_table_plan(kind: dbhelper_models::DbKind, old: &dbhelper_models::TableDef, new: &dbhelper_models::TableDef) -> Vec<String> {
+    use dbhelper_models::{ColumnDef, DbKind};
+    let table = &new.name;
+    let quote = |ident: &str| -> String {
+        match kind {
+            DbKind::Mysql | DbKind::Sqlite => format!("`{ident}`"),
+            _ => format!("\"{ident}\""),
+        }
+    };
+    let col_type = |c: &ColumnDef| -> String { c.data_type.clone() };
+    let mut stmts = Vec::new();
+
+    for col in &new.columns {
+        match old.columns.iter().find(|c| c.name == col.name) {
+            None => {
+                let mut d = format!("ALTER TABLE {} ADD COLUMN {} {}", quote(table), quote(&col.name), col_type(col));
+                if !col.nullable {
+                    d.push_str(" NOT NULL");
+                }
+                if let Some(def) = &col.default {
+                    d.push_str(&format!(" DEFAULT {def}"));
+                }
+                stmts.push(d);
+            }
+            Some(old_col) => {
+                let type_changed = col_type(old_col).to_lowercase() != col_type(col).to_lowercase();
+                let null_changed = old_col.nullable != col.nullable;
+                let def_changed = old_col.default != col.default;
+                if !(type_changed || null_changed || def_changed) {
+                    continue;
+                }
+                match kind {
+                    DbKind::Sqlite => {
+                        // SQLite 无 MODIFY COLUMN，跳过（设计器会提示重建表）
+                    }
+                    DbKind::Postgres | DbKind::Elasticsearch => {
+                        if type_changed {
+                            stmts.push(format!(
+                                "ALTER TABLE {} ALTER COLUMN {} TYPE {}",
+                                quote(table),
+                                quote(&col.name),
+                                col_type(col)
+                            ));
+                        }
+                        if null_changed {
+                            stmts.push(format!(
+                                "ALTER TABLE {} ALTER COLUMN {} {} NOT NULL",
+                                quote(table),
+                                quote(&col.name),
+                                if col.nullable { "DROP" } else { "SET" }
+                            ));
+                        }
+                        if def_changed {
+                            match &col.default {
+                                Some(def) => stmts.push(format!(
+                                    "ALTER TABLE {} ALTER COLUMN {} SET DEFAULT {def}",
+                                    quote(table),
+                                    quote(&col.name)
+                                )),
+                                None => stmts.push(format!(
+                                    "ALTER TABLE {} ALTER COLUMN {} DROP DEFAULT",
+                                    quote(table),
+                                    quote(&col.name)
+                                )),
+                            }
+                        }
+                    }
+                    _ => {
+                        // MySQL / SQL Server / Oracle
+                        let mut d = format!(
+                            "ALTER TABLE {} {} COLUMN {} {}",
+                            quote(table),
+                            if kind == DbKind::SqlServer { "ALTER" } else { "MODIFY" },
+                            quote(&col.name),
+                            col_type(col)
+                        );
+                        if !col.nullable {
+                            d.push_str(" NOT NULL");
+                        }
+                        if let Some(def) = &col.default {
+                            d.push_str(&format!(" DEFAULT {def}"));
+                        }
+                        stmts.push(d);
+                    }
+                }
+            }
+        }
+    }
+
+    for col in &old.columns {
+        if !new.columns.iter().any(|c| c.name == col.name) {
+            stmts.push(format!("ALTER TABLE {} DROP COLUMN {}", quote(table), quote(&col.name)));
+        }
+    }
+
+    stmts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

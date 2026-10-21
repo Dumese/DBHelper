@@ -21,12 +21,36 @@ impl App {
         let iced::keyboard::Event::KeyPressed { key, modifiers, .. } = event else {
             return Task::none();
         };
-        let Some(tab) = self.current_query_mut() else { return Task::none() };
-        let mut sql = tab.sql.clone();
-        let mut caret = tab.caret;
-        let mut anchor = tab.anchor;
+        // 先取编辑器状态副本，不持有 &mut self，后续可自由改 self.completion 等
+        let Some((mut sql, mut caret, mut anchor)) = self
+            .current_query()
+            .map(|tab| (tab.sql.clone(), tab.caret, tab.anchor))
+        else {
+            return Task::none();
+        };
+        let completion_visible = self.completion.visible;
+        let completion_selected = self.completion.selected;
+        let completion_len = self.completion.items.len();
 
         let op = match (&key, modifiers.control()) {
+            // 补全：Ctrl+Space 呼出，Esc/Enter 交互
+            (Key::Character(c), true) if c.eq_ignore_ascii_case(" ") => {
+                return self.update(Msg::CompletionShow);
+            }
+            (Key::Named(key::Named::Escape), _) if completion_visible => {
+                return self.update(Msg::CompletionHide);
+            }
+            (Key::Named(key::Named::Enter), _) if completion_visible => {
+                return self.update(Msg::CompletionPick(completion_selected));
+            }
+            (Key::Named(key::Named::ArrowDown), _) if completion_visible => {
+                self.completion.selected = (completion_selected + 1).min(completion_len.saturating_sub(1));
+                return Task::none();
+            }
+            (Key::Named(key::Named::ArrowUp), _) if completion_visible => {
+                self.completion.selected = completion_selected.saturating_sub(1);
+                return Task::none();
+            }
             (Key::Character(c), true) if c.eq_ignore_ascii_case("a") => Some(EditOp::SelectAll),
             (Key::Character(c), true) if c.eq_ignore_ascii_case("c") => {
                 if let Some(text) = selected_text(&sql, caret, anchor) {
@@ -37,9 +61,11 @@ impl App {
             (Key::Character(c), true) if c.eq_ignore_ascii_case("x") => {
                 if let Some(text) = selected_text(&sql, caret, anchor) {
                     apply_edit(&mut sql, &mut caret, &mut anchor, EditOp::DeleteSelection);
-                    tab.sql = sql;
-                    tab.caret = caret;
-                    tab.anchor = anchor;
+                    if let Some(tab) = self.current_query_mut() {
+                        tab.sql = sql;
+                        tab.caret = caret;
+                        tab.anchor = anchor;
+                    }
                     return iced::clipboard::write(text);
                 }
                 None

@@ -15,6 +15,14 @@ pub enum Page {
     Es,
     Monitor,
     Settings,
+    /// 对象设计器（表 / 视图 / 索引 / 触发器）。
+    Designer,
+    /// BI 仪表板。
+    Dash,
+    /// 迁移与同步。
+    Transfer,
+    /// 服务器管理（用户权限 / 命令监控 / 聚合 / Pub-Sub / 模式分析）。
+    Admin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +107,9 @@ pub struct QueryTab {
     pub total_rows: Option<u64>,
     pub viewport: f32,
     pub gridded: bool,
+    /// EXPLAIN 结果（可视化执行计划）。
+    pub plan_columns: Vec<String>,
+    pub plan_rows: Vec<Vec<String>>,
 }
 
 impl QueryTab {
@@ -291,6 +302,216 @@ pub struct MonitorState {
     pub slow: Vec<SlowQuery>,
     pub error: Option<String>,
     pub last_update: i64,
+}
+
+// ---------------------------------------------------------------------------
+// 对象设计器（表 / 视图 / 索引 / 触发器）
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct DesignerState {
+    pub open: bool,
+    pub conn: Option<ConnId>,
+    pub table: String,
+    /// 0 列设计 / 1 索引 / 2 触发器 / 3 DDL 预览
+    pub tab: usize,
+    pub is_new: bool,
+    pub def: Option<TableDef>,
+    pub original: Option<TableDef>,
+    pub ddl_preview: String,
+    pub index_ddl: String,
+    pub trigger_ddl: String,
+    pub saving: bool,
+    pub error: Option<String>,
+    pub saved: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// BI 仪表板
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartKind {
+    Bar,
+    Line,
+    Area,
+    Pie,
+}
+
+impl ChartKind {
+    pub const ALL: [ChartKind; 4] = [ChartKind::Bar, ChartKind::Line, ChartKind::Area, ChartKind::Pie];
+    pub fn label(self) -> &'static str {
+        match self {
+            ChartKind::Bar => "柱状图",
+            ChartKind::Line => "折线图",
+            ChartKind::Area => "面积图",
+            ChartKind::Pie => "饼图",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ChartCard {
+    pub title: String,
+    pub sql: String,
+    pub kind: ChartKind,
+    /// 最近一次运行的类别标签与数值序列。
+    pub labels: Vec<String>,
+    pub values: Vec<f64>,
+    pub error: Option<String>,
+    pub running: bool,
+}
+
+impl Default for ChartCard {
+    fn default() -> Self {
+        Self {
+            title: "新图表".into(),
+            sql: "SELECT name, COUNT(*) AS n FROM users GROUP BY name LIMIT 8".into(),
+            kind: ChartKind::Bar,
+            labels: Vec::new(),
+            values: Vec::new(),
+            error: None,
+            running: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Dashboard {
+    pub name: String,
+    pub charts: Vec<ChartCard>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DashState {
+    pub conn: Option<ConnId>,
+    pub pages: Vec<Dashboard>,
+    pub active: usize,
+    pub auto_refresh: bool,
+    pub refresh_secs: u64,
+    pub last_refresh: i64,
+    /// 参数变量（:param 形式）名称→值。
+    pub params: Vec<(String, String)>,
+    pub tiled: bool,
+}
+
+impl Default for DashState {
+    fn default() -> Self {
+        Self {
+            conn: None,
+            pages: vec![Dashboard {
+                name: "仪表板 1".into(),
+                charts: vec![ChartCard::default(), ChartCard {
+                    title: "订单趋势".into(),
+                    sql: "SELECT DATE(created_at) AS d, COUNT(*) AS n FROM orders GROUP BY d LIMIT 30".into(),
+                    kind: ChartKind::Line,
+                    ..Default::default()
+                }],
+            }],
+            active: 0,
+            auto_refresh: true,
+            refresh_secs: 30,
+            last_refresh: 0,
+            params: Vec::new(),
+            tiled: true,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 迁移与同步
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferMode {
+    Structure,
+    Data,
+    Sync,
+    Copy,
+}
+
+impl TransferMode {
+    pub const ALL: [TransferMode; 4] =
+        [TransferMode::Structure, TransferMode::Data, TransferMode::Sync, TransferMode::Copy];
+    pub fn label(self) -> &'static str {
+        match self {
+            TransferMode::Structure => "结构同步",
+            TransferMode::Data => "数据传输",
+            TransferMode::Sync => "数据同步",
+            TransferMode::Copy => "跨库复制",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TransferState {
+    pub open: bool,
+    pub mode: TransferMode,
+    pub source_conn: Option<ConnId>,
+    pub target_conn: Option<ConnId>,
+    pub table: String,
+    pub running: bool,
+    pub log: Vec<String>,
+    pub error: Option<String>,
+}
+
+impl Default for TransferMode {
+    fn default() -> Self {
+        TransferMode::Structure
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 服务器管理
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct AdminState {
+    pub conn: Option<ConnId>,
+    /// 0 用户权限 / 1 命令监控 / 2 聚合管道 / 3 Pub-Sub / 4 模式分析
+    pub tab: usize,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+    pub pipeline: String,
+    pub pubsub_channel: String,
+    pub pubsub_messages: Vec<String>,
+    pub pubsub_live: bool,
+    pub analysis: String,
+    pub running: bool,
+    pub error: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// 导入向导
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct ImportState {
+    pub open: bool,
+    pub path: String,
+    pub table: String,
+    pub columns: Vec<String>,
+    pub preview: Vec<Vec<Value>>,
+    pub running: bool,
+    pub result: Option<String>,
+    pub error: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// 查询智能（补全 / 诊断 / 悬停）
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct CompletionState {
+    pub visible: bool,
+    pub items: Vec<String>,
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Diagnostic {
+    pub line: usize,
+    pub message: String,
 }
 
 // ---------------------------------------------------------------------------

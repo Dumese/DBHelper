@@ -4,7 +4,9 @@
 
 pub use crate::icons::icon;
 use crate::icons::Icon;
+use crate::i18n::Tr;
 use crate::theme::{bold, medium, radius, size as ts, space, Tone, Tokens};
+use dbhelper_models::Language;
 use iced::widget::{mouse_area, button, checkbox as iced_checkbox, container, row, slider, text, text_input, toggler, Space};
 use iced::{
     Alignment, Border, Color, Element, Font, Length, Padding, Shadow, Theme,
@@ -13,15 +15,18 @@ use iced::{
 #[derive(Clone, Copy)]
 pub struct Ctx {
     pub t: Tokens,
+    /// 当前语言的文案字典；视图用 `ctx.tr.xxx()` 取代硬编码中文字面量。
+    pub tr: Tr,
     pub ui: Font,
     pub mono: Font,
     pub scale: f32,
 }
 
 impl Ctx {
-    pub fn new(t: Tokens, ui_font: &str, mono_font: &str, serif: bool, scale: f32) -> Self {
+    pub fn new(t: Tokens, lang: Language, ui_font: &str, mono_font: &str, serif: bool, scale: f32) -> Self {
         Self {
             t,
+            tr: Tr::new(lang),
             ui: crate::theme::ui_font(ui_font, serif),
             mono: crate::theme::mono_font(mono_font),
             scale,

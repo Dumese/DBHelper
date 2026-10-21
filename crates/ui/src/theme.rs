@@ -170,18 +170,24 @@ pub mod size {
     pub const TINY: f32 = 11.0;
 }
 
-/// 界面字体族：Windows 上 "Inter" 未安装时由 cosmic-text 回退到系统无衬线体。
-/// 字体族必须是 `'static`：把设置里的可选项映射为静态字面量。
+/// 字体族映射：把设置里保存的字体名映射为字体库中可解析的真实族名。
+///
+/// 「Noto Sans SC / Noto Serif SC / JetBrains Mono」三套字体由 `crates/app/assets/fonts/`
+/// 内嵌进二进制（见 `crates/app/src/main.rs`），不依赖系统安装，切换必现效果。
+/// 字体族必须是 `'static`：返回静态字面量。
 pub fn static_family(name: &str) -> &'static str {
     match name {
-        // 设计规范指定的三套字体（随系统安装）
+        // 内嵌字体族（恒可用）
         "Noto Sans SC" => "Noto Sans SC",
         "Noto Serif SC" => "Noto Serif SC",
         "JetBrains Mono" => "JetBrains Mono",
-        // 兼容旧配置与外部导入的配置
-        "Inter" | "Segoe UI" | "Microsoft YaHei UI" => "Noto Sans SC",
-        "Consolas" | "Cascadia Mono" | "IBM Plex Mono" => "JetBrains Mono",
-        "Georgia" | "宋体" => "Noto Serif SC",
+        // 系统等宽字体（编辑器下拉可选项，Windows 自带）
+        "Consolas" => "Consolas",
+        "Courier New" => "Courier New",
+        // 兼容旧配置 / 外部导入
+        "Inter" | "Segoe UI" | "Microsoft YaHei UI" | "宋体" | "SimSun" | "NSimSun" => "Noto Sans SC",
+        "Georgia" | "Noto Serif" => "Noto Serif SC",
+        "Cascadia Mono" | "Cascadia Code" | "IBM Plex Mono" | "Lucida Console" => "JetBrains Mono",
         _ => "Noto Sans SC",
     }
 }

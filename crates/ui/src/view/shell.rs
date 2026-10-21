@@ -11,22 +11,27 @@ use iced::{Alignment, Border, Color, Element, Length, Padding, Theme};
 
 pub fn titlebar<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
+    let tr = ctx.tr;
     let title = match app.page {
-        Page::Connections => "连接管理".to_string(),
+        Page::Connections => tr.conn_management().to_string(),
         Page::Query => app
             .current_query()
             .map(|q| format!("{} — {}", q.title, app.conn_display(q.conn)))
-            .unwrap_or_else(|| "查询".into()),
+            .unwrap_or_else(|| tr.query().into()),
         Page::Data => app
             .current_data()
-            .map(|d| format!("数据 — {}", d.table))
-            .unwrap_or_else(|| "数据".into()),
-        Page::Er => "设计 — ER 图".into(),
-        Page::Redis => format!("cache — Redis"),
-        Page::Mongo => "appdb.users — 文档".into(),
-        Page::Es => "logs — DSL".into(),
-        Page::Monitor => "监控 — 服务器".into(),
-        Page::Settings => "设置 / Settings".into(),
+            .map(|d| format!("{} — {}", tr.data(), d.table))
+            .unwrap_or_else(|| tr.data().into()),
+        Page::Er => format!("{} — {}", tr.design(), tr.er_diagram()),
+        Page::Redis => format!("{} — Redis", tr.cache()),
+        Page::Mongo => format!("appdb.users — {}", tr.documents()),
+        Page::Es => format!("{} — DSL", tr.logs()),
+        Page::Monitor => format!("{} — {}", tr.monitor(), tr.server()),
+        Page::Settings => tr.settings().into(),
+        Page::Designer => format!("表设计 — {}", app.designer.table),
+        Page::Dash => "BI 仪表板".into(),
+        Page::Transfer => "迁移与同步".into(),
+        Page::Admin => "服务器管理".into(),
     };
 
     let left = row![
@@ -96,11 +101,12 @@ fn win_btn<'a>(ctx: Ctx, ic: Icon, msg: Msg, danger: bool) -> Element<'a, Msg> {
 
 pub fn breadcrumb<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
-    let mut crumbs: Vec<String> = vec!["连接".into()];
+    let tr = ctx.tr;
+    let mut crumbs: Vec<String> = vec![tr.connections().into()];
     match app.page {
-        Page::Connections => crumbs.push("全部连接".into()),
+        Page::Connections => crumbs.push(tr.all_connections().into()),
         Page::Settings => {
-            crumbs = vec!["DBHelper".into(), "设置".into()];
+            crumbs = vec!["DBHelper".into(), tr.settings().into()];
         }
         Page::Query => {
             if let Some(q) = app.current_query() {
@@ -113,24 +119,24 @@ pub fn breadcrumb<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
             if let Some(d) = app.current_data() {
                 crumbs.push(app.conn_display(d.conn));
                 crumbs.push(d.db.clone().unwrap_or_else(|| app.database.clone().unwrap_or_default()));
-                crumbs.push("表".into());
+                crumbs.push(tr.table().into());
                 crumbs.push(d.table.clone());
-                crumbs.push("数据".into());
+                crumbs.push(tr.data().into());
             }
         }
         Page::Er => {
             if let Some(conn) = app.er.conn {
                 crumbs.push(app.conn_display(conn));
                 crumbs.push(app.database.clone().unwrap_or_else(|| "mydb".into()));
-                crumbs.push("设计".into());
-                crumbs.push("ER 图".into());
+                crumbs.push(tr.design().into());
+                crumbs.push(tr.er_diagram().into());
             }
         }
         Page::Redis => {
             if let Some(conn) = app.redis.conn {
                 crumbs.push(app.conn_display(conn));
                 crumbs.push(format!("db{}", app.redis.db));
-                crumbs.push("键".into());
+                crumbs.push(tr.key().into());
                 if let Some(key) = &app.redis.selected {
                     crumbs.push(key.clone());
                 }
@@ -142,26 +148,45 @@ pub fn breadcrumb<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
                 crumbs.push(app.mongo.db.clone().unwrap_or_default());
                 if let Some(c) = &app.mongo.collection {
                     crumbs.push(c.clone());
-                    crumbs.push("文档".into());
+                    crumbs.push(tr.documents().into());
                 }
             }
         }
         Page::Es => {
             if let Some(conn) = app.es.conn {
                 crumbs.push(app.conn_display(conn));
-                crumbs.push("索引".into());
+                crumbs.push(tr.index().into());
                 if let Some(i) = &app.es.index {
                     crumbs.push(i.clone());
-                    crumbs.push("查询".into());
+                    crumbs.push(tr.query().into());
                 }
             }
         }
         Page::Monitor => {
             if let Some(conn) = app.monitor.conn {
                 crumbs.push(app.conn_display(conn));
-                crumbs.push("监控".into());
-                crumbs.push("服务器".into());
+                crumbs.push(tr.monitor().into());
+                crumbs.push(tr.server().into());
             }
+        }
+        Page::Designer => {
+            crumbs.push("对象设计器".into());
+            crumbs.push(app.designer.table.clone());
+        }
+        Page::Dash => {
+            crumbs.push("BI".into());
+            if let Some(p) = app.dash.pages.get(app.dash.active) {
+                crumbs.push(p.name.clone());
+            }
+        }
+        Page::Transfer => {
+            crumbs.push("迁移与同步".into());
+        }
+        Page::Admin => {
+            if let Some(conn) = app.admin.conn {
+                crumbs.push(app.conn_display(conn));
+            }
+            crumbs.push("服务器管理".into());
         }
     }
 
@@ -209,6 +234,10 @@ pub fn breadcrumb<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
     let actions: Element<Msg> = row![
         kit::icon_button(ctx, Icon::Refresh, 12.5, t.text_secondary, Msg::RefreshTree),
+        kit::icon_button(ctx, Icon::Chart, 12.5, t.text_secondary, Msg::DashOpen(app.active_conn.unwrap_or(0))),
+        kit::icon_button(ctx, Icon::Download, 12.5, t.text_secondary, Msg::ImportOpen),
+        kit::icon_button(ctx, Icon::Save, 12.5, t.text_secondary, Msg::TransferOpen),
+        kit::icon_button(ctx, Icon::Lock, 12.5, t.text_secondary, Msg::AdminOpen(app.active_conn.unwrap_or(0))),
         kit::icon_button(ctx, Icon::More, 12.5, t.text_secondary, Msg::ConnMenu(0)),
     ]
     .spacing(2)
@@ -336,6 +365,7 @@ fn sidebar_header<'a>(ctx: Ctx, title: &str, add: Option<Msg>, more: Option<Msg>
 }
 
 fn connection_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
+    let tr = ctx.tr;
     let mut list = column![].spacing(0).width(Length::Fill);
 
     // 与原型一致：连接为扁平列表（分组只出现在右栏），无分组头
@@ -375,12 +405,13 @@ fn connection_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
             }
             let tkey = format!("tables:{}:{}", conn.id, db);
             let topen = app.expanded.contains(&tkey);
-            list = list.push(group_count_row(ctx, "表", tables.len(), topen, tkey.clone(), Icon::Table));
+            list = list.push(group_count_row(ctx, tr.table(), tables.len(), topen, tkey.clone(), Icon::Table));
             if topen {
                 for obj in &tables {
                     let sel = app.selected_node.as_deref() == Some(&format!("t:{}:{}", conn.id, obj.name));
                     list = list.push(obj_row(
                         ctx,
+                        conn.id,
                         &obj.name,
                         Icon::Table,
                         sel,
@@ -392,11 +423,12 @@ fn connection_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
             if !views.is_empty() {
                 let vkey = format!("views:{}:{}", conn.id, db);
                 let vopen = app.expanded.contains(&vkey);
-                list = list.push(group_count_row(ctx, "视图", views.len(), vopen, vkey.clone(), Icon::Eye));
+                list = list.push(group_count_row(ctx, tr.view(), views.len(), vopen, vkey.clone(), Icon::Eye));
                 if vopen {
                     for obj in &views {
                         list = list.push(obj_row(
                             ctx,
+                            conn.id,
                             &obj.name,
                             Icon::Eye,
                             false,
@@ -409,12 +441,12 @@ fn connection_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         }
     }
 
-    let search = kit::search_field(ctx, "搜索连接、表、字段", &app.search, Msg::SearchChanged);
+    let search = kit::search_field(ctx, tr.search_conns(), &app.search, Msg::SearchChanged);
 
     column![
         sidebar_header(
             ctx,
-            "连接",
+            tr.connections(),
             Some(Msg::WizardOpen),
             Some(Msg::ConnMenu(-1)),
         ),
@@ -625,6 +657,7 @@ fn group_count_row<'a>(
 
 fn obj_row<'a>(
     ctx: Ctx,
+    conn: ConnId,
     name: &str,
     ic: Icon,
     selected: bool,
@@ -632,36 +665,42 @@ fn obj_row<'a>(
     _key: String,
 ) -> Element<'a, Msg> {
     let t = ctx.t;
-    button(
-        row![
-            Space::new().width(Length::Fixed(14.0)).height(Length::Fixed(0.0)),
-            icon(ic, 12.0, t.text_secondary),
-            text(name.to_string()).size(ctx.f(ts::SMALL)).font(ctx.ui).color(t.text),
-            kit::hspace(),
-        ]
-        .spacing(6)
-        .align_y(Alignment::Center)
-        .padding(Padding { top: 0.0, right: 10.0, bottom: 0.0, left: 42.0 }),
-    )
-    .padding(0)
-    .height(Length::Fixed(26.0))
+    row![
+        button(
+            row![
+                Space::new().width(Length::Fixed(14.0)).height(Length::Fixed(0.0)),
+                icon(ic, 12.0, t.text_secondary),
+                text(name.to_string()).size(ctx.f(ts::SMALL)).font(ctx.ui).color(t.text),
+                kit::hspace(),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .padding(Padding { top: 0.0, right: 10.0, bottom: 0.0, left: 42.0 }),
+        )
+        .padding(0)
+        .height(Length::Fixed(26.0))
+        .width(Length::Fill)
+        .style(move |_: &Theme, status| button::Style {
+            background: Some(
+                if selected {
+                    t.selected
+                } else if matches!(status, button::Status::Hovered) {
+                    t.hover
+                } else {
+                    Color::TRANSPARENT
+                }
+                .into(),
+            ),
+            text_color: t.text,
+            border: Border::default(),
+            ..Default::default()
+        })
+        .on_press(msg),
+        // 对象设计器快捷入口
+        kit::icon_button(ctx, Icon::Doc, 11.0, t.text_tertiary, Msg::DesignerOpen(conn, name.to_string())),
+    ]
+    .align_y(Alignment::Center)
     .width(Length::Fill)
-    .style(move |_: &Theme, status| button::Style {
-        background: Some(
-            if selected {
-                t.selected
-            } else if matches!(status, button::Status::Hovered) {
-                t.hover
-            } else {
-                Color::TRANSPARENT
-            }
-            .into(),
-        ),
-        text_color: t.text,
-        border: Border::default(),
-        ..Default::default()
-    })
-    .on_press(msg)
     .into()
 }
 
@@ -692,6 +731,7 @@ fn action_row<'a>(ctx: Ctx, label: &str, ic: Icon, msg: Msg) -> Element<'a, Msg>
 
 fn keyspace_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
+    let tr = ctx.tr;
     let mut list = column![].spacing(0);
     let info = app.redis.info.clone();
     let dbs = info.as_ref().map(|i| i.keyspace.clone()).unwrap_or_default();
@@ -782,10 +822,10 @@ fn keyspace_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     }
     let _ = total;
 
-    let search = kit::search_field(ctx, "匹配键名 *profile", &app.redis.pattern, Msg::RedisScan);
+    let search = kit::search_field(ctx, tr.search_keys(), &app.redis.pattern, Msg::RedisScan);
 
     column![
-        sidebar_header(ctx, "键空间", None, Some(Msg::ConnMenu(-1))),
+        sidebar_header(ctx, tr.keyspace(), None, Some(Msg::ConnMenu(-1))),
         container(search).padding(Padding { top: 0.0, right: 10.0, bottom: 6.0, left: 10.0 }),
         scrollable(list).height(Length::Fill).style(scroll_style(ctx)),
     ]
@@ -795,6 +835,7 @@ fn keyspace_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
 fn collections_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
+    let tr = ctx.tr;
     let mut list = column![].spacing(0);
     list = list.push(
         row![
@@ -855,7 +896,7 @@ fn collections_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     }
 
     column![
-        sidebar_header(ctx, "集合", None, Some(Msg::ConnMenu(-1))),
+        sidebar_header(ctx, tr.collections(), None, Some(Msg::ConnMenu(-1))),
         scrollable(list).height(Length::Fill).style(scroll_style(ctx)),
     ]
     .height(Length::Fill)
@@ -864,6 +905,7 @@ fn collections_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
 fn indices_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
+    let tr = ctx.tr;
     let mut list = column![].spacing(0);
     list = list.push(
         row![
@@ -913,7 +955,7 @@ fn indices_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     }
 
     column![
-        sidebar_header(ctx, "索引", None, Some(Msg::ConnMenu(-1))),
+        sidebar_header(ctx, tr.index(), None, Some(Msg::ConnMenu(-1))),
         scrollable(list).height(Length::Fill).style(scroll_style(ctx)),
     ]
     .height(Length::Fill)
@@ -922,7 +964,8 @@ fn indices_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
 fn settings_nav<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
-    let items = ["显示配置", "常规配置", "文件配置"];
+    let tr = ctx.tr;
+    let items = [tr.display_config(), tr.normal_config(), tr.file_config()];
     let mut list = column![].spacing(2);
     for (i, label) in items.iter().enumerate() {
         let active = app.settings_ui.section == i;
@@ -954,7 +997,7 @@ fn settings_nav<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         );
     }
     column![
-        sidebar_header(ctx, "设置", None, None),
+        sidebar_header(ctx, tr.settings(), None, None),
         container(list).padding(Padding { top: 0.0, right: 10.0, bottom: 0.0, left: 10.0 }),
         kit::hspace(),
         container(
@@ -971,7 +1014,12 @@ fn settings_nav<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
 fn vault_footer<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
-    let label = if app.core.is_some() { "Vault 已加密".to_string() } else { "初始化中…".into() };
+    let tr = ctx.tr;
+    let label = if app.core.is_some() {
+        tr.vault_encrypted().to_string()
+    } else {
+        tr.initializing().into()
+    };
     let bar = container(
         row![
             icon(Icon::Shield, 12.0, t.text_secondary),
@@ -1004,15 +1052,23 @@ fn vault_footer<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
 pub fn statusbar<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
+    let tr = ctx.tr;
     let memory = app.metrics.rss_mb.max(1.0);
     let conns = app.conns.len();
     // 与原型一致：左侧运行指标，右侧 Vault 状态
-    let left = format!("内存 {:.0} MB · 连接 {} · 已加密", memory, conns);
+    let left = format!(
+        "{} {:.0} MB · {} {} · {}",
+        tr.memory(),
+        memory,
+        conns,
+        tr.connections_count(),
+        tr.encrypted()
+    );
     let right = app
         .core
         .as_ref()
-        .map(|c| format!("{} · {} 个连接", c.vault_status(), conns))
-        .unwrap_or_else(|| "Vault 初始化中…".into());
+        .map(|c| format!("{} · {} {}", c.vault_status(), conns, tr.connections_count()))
+        .unwrap_or_else(|| tr.initializing().into());
 
     container(
         row![

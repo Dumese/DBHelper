@@ -3,12 +3,14 @@
 //! 采用 iced 的 Elm 架构：`Msg` 是唯一状态变更入口，`view` 是纯函数。
 //! 所有耗时操作（连接、查询、导出）通过 `Task` 派发到 tokio 运行时。
 
+pub mod i18n;
 pub mod icons;
 pub mod kit;
 pub mod perf;
 pub mod state;
 pub mod theme;
 pub mod update;
+pub mod update_features;
 pub mod update_ops;
 pub mod view;
 pub mod widgets;
@@ -102,6 +104,12 @@ pub struct App {
     pub monitor: MonitorState,
     pub settings_ui: SettingsUi,
     pub conn_ui: ConnUi,
+    pub designer: DesignerState,
+    pub dash: DashState,
+    pub transfer: TransferState,
+    pub admin: AdminState,
+    pub import: ImportState,
+    pub completion: CompletionState,
 
     pub active_conn: Option<ConnId>,
     pub database: Option<String>,
@@ -116,6 +124,10 @@ pub struct App {
     pub nav_stack: Vec<Page>,
     pub es_editor: iced::widget::text_editor::Content,
     pub mongo_editor: iced::widget::text_editor::Content,
+    /// 实时 SQL 诊断（括号/引号/高危语句）。
+    pub diagnostics: Vec<Diagnostic>,
+    /// 编辑器悬停词（对象信息提示）。
+    pub hover_word: Option<String>,
 }
 
 #[derive(Clone)]
@@ -288,6 +300,75 @@ pub enum Msg {
     ExportRun,
     ExportDone(Result<usize, String>),
 
+    // 查询智能：补全 / 诊断 / 悬停 / 执行计划
+    CompletionShow,
+    CompletionHide,
+    CompletionPick(usize),
+    DiagnosticsReady(Vec<Diagnostic>),
+    HoverWord(Option<String>),
+    ExplainRun,
+    ExplainReady(Result<dbhelper_models::QueryOutcome, String>),
+
+    // 对象设计器
+    DesignerOpen(ConnId, String),
+    DesignerNew(ConnId),
+    DesignerLoaded(Result<(TableDef, String), String>),
+    DesignerTab(usize),
+    DesignerColField(usize, String, String),
+    DesignerAddCol,
+    DesignerDelCol(usize),
+    DesignerDdlField(String, String),
+    DesignerSave,
+    DesignerSaved(Result<String, String>),
+    DesignerClose,
+
+    // BI 仪表板
+    DashOpen(ConnId),
+    DashPick(usize),
+    DashAddPage,
+    DashAddChart(usize),
+    DashChartKind(usize, ChartKind),
+    DashChartSql(usize, String),
+    DashChartTitle(usize, String),
+    DashRun(usize),
+    DashRunAll,
+    DashChartResult(usize, Result<(Vec<String>, Vec<f64>), String>),
+    DashDelChart(usize),
+    DashDelPage(usize),
+    DashParamEdit(String, String),
+    DashToggleAuto,
+    DashToggleTiled,
+
+    // 迁移与同步
+    TransferOpen,
+    TransferModePick(usize),
+    TransferSource(ConnId),
+    TransferTarget(ConnId),
+    TransferTable(String),
+    TransferRun,
+    TransferLog(String),
+    TransferDone(Result<(), String>),
+    TransferClose,
+
+    // 服务器管理
+    AdminOpen(ConnId),
+    AdminTab(usize),
+    AdminRun,
+    AdminLoaded(Result<(Vec<String>, Vec<Vec<String>>), String>),
+    AdminPipeline(String),
+    AdminPubSubChannel(String),
+    AdminPubSubToggle,
+    AdminPubSubMsg(String),
+
+    // 导入
+    ImportOpen,
+    ImportFilePicked(Option<String>),
+    ImportLoaded(Result<(Vec<String>, Vec<Vec<Value>>, String), String>),
+    ImportTable(String),
+    ImportRun,
+    ImportDone(Result<u64, String>),
+    ImportClose,
+
     // 通用
     ToastClose(usize),
     DismissModal,
@@ -400,6 +481,12 @@ impl App {
             monitor: MonitorState::default(),
             settings_ui: SettingsUi::default(),
             conn_ui: ConnUi::default(),
+            designer: DesignerState::default(),
+            dash: DashState::default(),
+            transfer: TransferState::default(),
+            admin: AdminState::default(),
+            import: ImportState::default(),
+            completion: CompletionState::default(),
             active_conn: None,
             database: None,
             metrics: Metrics::default(),
@@ -416,6 +503,8 @@ impl App {
             mongo_editor: iced::widget::text_editor::Content::with_text(
                 "[ { $match: { status: \"active\" } }, { $group: { _id: \"$role\", n: { $sum: 1 } } } ]",
             ),
+            diagnostics: Vec::new(),
+            hover_word: None,
         };
         let task = Task::perform(
             async {
@@ -434,6 +523,7 @@ impl App {
     pub fn ctx(&self) -> Ctx {
         Ctx::new(
             if self.settings.theme == ThemeMode::Dark { theme::Tokens::DARK } else { theme::Tokens::LIGHT },
+            self.settings.language,
             &self.settings.ui_font,
             &self.settings.editor_font,
             self.settings.ui_serif,

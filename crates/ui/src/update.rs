@@ -341,7 +341,7 @@ impl App {
                 if let Some(tab) = self.current_query_mut() {
                     tab.sql = text;
                 }
-                Task::none()
+                self.run_diagnostics()
             }
             Msg::QueryRun => self.run_current_query(),
             Msg::QueryStop => {
@@ -1093,7 +1093,8 @@ impl App {
             }
             Msg::CopyText(text) => iced::clipboard::write(text),
             Msg::Noop => Task::none(),
-            _ => Task::none(),
+            // 其余消息（查询智能 / 设计器 / BI / 迁移 / 管理 / 导入）在 update_features
+            other => self.update_features(other),
         }
     }
 

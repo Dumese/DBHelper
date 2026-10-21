@@ -10,16 +10,12 @@ use iced::{Alignment, Border, Element, Length, Padding, Theme};
 
 pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
+    let tr = ctx.tr;
 
     let header = container(
         column![
-            kit::txt_bold(ctx, "设置", ts::PAGE, t.text),
-            kit::txt(
-                ctx,
-                "管理 DBHelper 的外观、编辑器行为与文件位置偏好。",
-                ts::SMALL,
-                t.text_secondary
-            ),
+            kit::txt_bold(ctx, tr.settings(), ts::PAGE, t.text),
+            kit::txt(ctx, tr.settings_sub(), ts::SMALL, t.text_secondary),
         ]
         .spacing(2),
     )
@@ -27,17 +23,17 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
     let display = card_block(
         ctx,
-        "显示配置",
+        tr.display_config(),
         column![
             kit::setting_row(
                 ctx,
-                "颜色模式",
-                "切换深色或浅色界面主题（全局生效）",
+                tr.color_mode(),
+                tr.color_mode_desc(),
                 kit::segmented(
                     ctx,
                     &[
-                        ("浅色", app.settings.theme == ThemeMode::Light),
-                        ("深色", app.settings.theme == ThemeMode::Dark)
+                        (tr.light(), app.settings.theme == ThemeMode::Light),
+                        (tr.dark(), app.settings.theme == ThemeMode::Dark)
                     ],
                     |i| Msg::SetTheme(if i == 0 { ThemeMode::Light } else { ThemeMode::Dark })
                 )
@@ -45,8 +41,8 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
             kit::hline(ctx),
             kit::setting_row(
                 ctx,
-                "语言",
-                "界面显示语言",
+                tr.language(),
+                tr.language_desc(),
                 pick_list(
                     &Language::ALL[..],
                     Some(app.settings.language),
@@ -63,10 +59,14 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
             kit::hline(ctx),
             kit::setting_row(
                 ctx,
-                "编辑器字体",
-                "代码编辑区使用，仅可选等宽字体",
+                tr.editor_font(),
+                tr.editor_font_desc(),
                 pick_list(
-                    vec!["JetBrains Mono".to_string(), "Noto Sans SC".to_string(), "Cascadia Mono".to_string()],
+                    vec![
+                        "JetBrains Mono".to_string(),
+                        "Consolas".to_string(),
+                        "Courier New".to_string(),
+                    ],
                     Some(app.settings.editor_font.clone()),
                     Msg::SetEditorFont
                 )
@@ -81,11 +81,14 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
             kit::hline(ctx),
             kit::setting_row(
                 ctx,
-                "显示字体",
-                "界面组件与按钮文字的显示",
+                tr.ui_font(),
+                tr.ui_font_desc(),
                 row![
                     pick_list(
-                        vec!["Noto Sans SC".to_string(), "Noto Serif SC".to_string()],
+                        vec![
+                            "Noto Sans SC".to_string(),
+                            "Noto Serif SC".to_string(),
+                        ],
                         Some(app.settings.ui_font.clone()),
                         Msg::SetUiFont
                     )
@@ -98,7 +101,7 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
                     .handle(pick_list::Handle::Arrow { size: Some(9.0.into()) }),
                     kit::segmented(
                         ctx,
-                        &[("无衬线", !app.settings.ui_serif), ("衬线", app.settings.ui_serif)],
+                        &[(tr.sans(), !app.settings.ui_serif), (tr.serif(), app.settings.ui_serif)],
                         |i| Msg::SetSerif(i == 1)
                     ),
                 ]
@@ -107,17 +110,15 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
             kit::hline(ctx),
             kit::setting_row(
                 ctx,
-                "字体大小",
-                "调整界面文字大小（12–18 px）",
+                tr.font_size(),
+                tr.font_size_desc(),
                 row![
-                    container(
-                        kit::slider_row(
-                            ctx,
-                            app.settings.font_size as f32,
-                            12.0..=18.0,
-                            |v| Msg::SetFontSize(v.round() as u16)
-                        )
-                    )
+                    container(kit::slider_row(
+                        ctx,
+                        app.settings.font_size as f32,
+                        12.0..=18.0,
+                        |v| Msg::SetFontSize(v.round() as u16)
+                    ))
                     .width(Length::Fixed(200.0)),
                     kit::txt(ctx, format!("{} px", app.settings.font_size), ts::SMALL, t.text_secondary),
                 ]
@@ -130,41 +131,29 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
     let normal = card_block(
         ctx,
-        "常规配置",
+        tr.normal_config(),
         column![
-            toggle_row(ctx, "显示行号", "在编辑器中显示行号", app.settings.show_line_numbers, Msg::SetLineNumbers),
-            toggle_row(ctx, "自动换行", "长行自动折叠换行", app.settings.auto_wrap, Msg::SetAutoWrap),
-            toggle_row(ctx, "语法高亮", "为 SQL 等语句着色关键字与函数", app.settings.syntax_highlight, Msg::SetSyntax),
-            toggle_row(ctx, "括号高亮", "匹配括号时高亮提示", app.settings.bracket_highlight, Msg::SetBracket),
+            toggle_row(ctx, tr.show_line_numbers(), tr.show_line_numbers_desc(), app.settings.show_line_numbers, Msg::SetLineNumbers),
+            toggle_row(ctx, tr.auto_wrap(), tr.auto_wrap_desc(), app.settings.auto_wrap, Msg::SetAutoWrap),
+            toggle_row(ctx, tr.syntax_highlight(), tr.syntax_highlight_desc(), app.settings.syntax_highlight, Msg::SetSyntax),
+            toggle_row(ctx, tr.bracket_highlight(), tr.bracket_highlight_desc(), app.settings.bracket_highlight, Msg::SetBracket),
         ]
         .spacing(0),
     );
 
     let files = card_block(
         ctx,
-        "文件配置",
+        tr.file_config(),
         column![
-            path_row(
-                ctx,
-                "日志位置",
-                "应用程序日志文件保存路径",
-                &app.settings.log_dir,
-                DirTarget::Log
-            ),
+            path_row(ctx, tr.log_location(), tr.log_location_desc(), &app.settings.log_dir, DirTarget::Log),
             kit::hline(ctx),
-            path_row(
-                ctx,
-                "配置文件位置",
-                "DBHelper 配置文件（config.json）路径",
-                &app.settings.config_path,
-                DirTarget::Config
-            ),
+            path_row(ctx, tr.config_location(), tr.config_location_desc(), &app.settings.config_path, DirTarget::Config),
             kit::hline(ctx),
             kit::setting_row(
                 ctx,
-                "导出向导",
-                "将连接配置、查询历史与偏好导出为文件",
-                kit::primary(ctx, "打开导出向导", Msg::OpenExportWizard)
+                tr.export_wizard(),
+                tr.export_wizard_desc(),
+                kit::primary(ctx, tr.open_export_wizard(), Msg::OpenExportWizard)
             ),
         ]
         .spacing(0),
@@ -232,7 +221,7 @@ fn path_row<'a>(ctx: Ctx, title: &str, desc: &str, value: &str, target: DirTarge
         row![
             container(kit::input(ctx, "", value, |_| Msg::Noop))
                 .width(Length::Fixed(330.0)),
-            kit::secondary(ctx, "浏览…", Msg::BrowseDir(target)),
+            kit::secondary(ctx, ctx.tr.browse(), Msg::BrowseDir(target)),
         ]
         .spacing(8)
         .align_y(Alignment::Center),
