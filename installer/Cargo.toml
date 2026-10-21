@@ -1,0 +1,13 @@
+[package]
+name = "dbhelper-installer"
+version.workspace = true
+edition.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "dbhelper-setup"
+path = "src/main.rs"
+
+[dependencies]
+iced = { workspace = true }
+tokio = { workspace = true }

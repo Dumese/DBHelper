@@ -1,0 +1,23 @@
+[package]
+name = "dbhelper-tests"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+dbhelper-models = { workspace = true }
+dbhelper-utils = { workspace = true }
+dbhelper-core = { workspace = true }
+rel-common = { workspace = true }
+driver-sqlite = { workspace = true }
+driver-mysql = { workspace = true }
+driver-postgres = { workspace = true }
+driver-mssql = { workspace = true }
+driver-oracle = { workspace = true }
+driver-redis = { workspace = true }
+driver-mongodb = { workspace = true }
+driver-elasticsearch = { workspace = true }
+tokio = { workspace = true }

@@ -1,0 +1,33 @@
+[package]
+name = "dbhelper-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dbhelper-models = { workspace = true }
+dbhelper-utils = { workspace = true }
+rel-common = { workspace = true }
+driver-sqlite = { workspace = true }
+driver-mysql = { workspace = true }
+driver-postgres = { workspace = true }
+driver-mssql = { workspace = true }
+driver-oracle = { workspace = true }
+driver-redis = { workspace = true }
+driver-mongodb = { workspace = true }
+driver-elasticsearch = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+sysinfo = { workspace = true }
+parking_lot = { workspace = true }
+futures = { workspace = true }
+csv = { workspace = true }
+rust_xlsxwriter = { workspace = true }
+calamine = { workspace = true }
+quick-xml = { workspace = true }
+rand = { workspace = true }
+sqlx = { workspace = true }

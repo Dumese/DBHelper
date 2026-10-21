@@ -1,0 +1,14 @@
+[package]
+name = "driver-redis"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dbhelper-models = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+redis = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }

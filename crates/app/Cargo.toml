@@ -1,0 +1,21 @@
+[package]
+name = "dbhelper"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "dbhelper"
+path = "src/main.rs"
+
+[dependencies]
+dbhelper-models = { workspace = true }
+dbhelper-utils = { workspace = true }
+dbhelper-core = { workspace = true }
+dbhelper-ui = { workspace = true }
+iced = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

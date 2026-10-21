@@ -1,0 +1,15 @@
+[package]
+name = "driver-mysql"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dbhelper-models = { workspace = true }
+rel-common = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }

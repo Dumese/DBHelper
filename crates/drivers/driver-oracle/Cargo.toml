@@ -1,0 +1,16 @@
+[package]
+name = "driver-oracle"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dbhelper-models = { workspace = true }
+rel-common = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+oracle = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
