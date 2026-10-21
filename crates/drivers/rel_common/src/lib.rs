@@ -257,7 +257,7 @@ pub fn estimate_sql(kind: DbKind, sql: &str) -> Option<String> {
         .chars()
         .take_while(|c| !c.is_whitespace() && *c != ';')
         .collect();
-    let where_idx = upper.rfind("WHERE")?;
+    let where_idx = upper.find("WHERE")?;
     let where_clause = sql[where_idx + 5..].trim().trim_end_matches(';');
     if table.is_empty() {
         return None;

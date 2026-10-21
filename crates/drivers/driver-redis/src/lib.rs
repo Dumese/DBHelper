@@ -402,6 +402,9 @@ impl RedisDriver {
 
     /// 任意命令（命令历史/调试面板）。
     pub async fn raw_command(&self, args: &[String]) -> RedisResult<Json> {
+        if args.is_empty() {
+            return Err(RedisError::Command("命令为空".into()));
+        }
         let mut conn = self.conn().await?;
         let mut cmd = redis::cmd(&args[0]);
         for a in &args[1..] {

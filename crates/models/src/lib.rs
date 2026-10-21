@@ -427,7 +427,14 @@ impl Value {
         match self {
             Value::Null => "NULL".into(),
             Value::Int(v) => v.to_string(),
-            Value::Float(v) => v.to_string(),
+            Value::Float(v) => {
+                if v.is_finite() {
+                    v.to_string()
+                } else {
+                    // NaN / ±Inf 不能作为合法 SQL 字面量，退化为 NULL。
+                    "NULL".into()
+                }
+            }
             Value::Decimal(s) => s.clone(),
             Value::Bool(b) => if *b { "TRUE" } else { "FALSE" }.into(),
             Value::Bytes(b) => {

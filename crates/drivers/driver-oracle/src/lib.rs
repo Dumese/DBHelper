@@ -63,19 +63,21 @@ where
 fn decode_row(row: &oracle::Row, count: usize) -> Row {
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
-        let value = match row.get::<usize, Option<String>>(i) {
-            Ok(Some(s)) => Value::Text(s),
-            Ok(None) => Value::Null,
-            Err(_) => match row.get::<usize, Option<f64>>(i) {
-                Ok(Some(f)) => Value::Float(f),
-                Ok(None) => Value::Null,
-                Err(_) => match row.get::<usize, Option<i64>>(i) {
-                    Ok(Some(n)) => Value::Int(n),
-                    Ok(None) => Value::Null,
-                    Err(e) => Value::Text(format!("<{}>", e)),
-                },
-            },
-        };
+        // 按列类型逐次尝试：整数优先保精度，浮点排除 NaN/Inf，字符串兜日期/大数/文本。
+        let value = row
+            .get::<usize, Option<i64>>(i)
+            .ok()
+            .flatten()
+            .map(Value::Int)
+            .or_else(|| {
+                row.get::<usize, Option<f64>>(i)
+                    .ok()
+                    .flatten()
+                    .map(|f| if f.is_finite() { Value::Float(f) } else { Value::Null })
+            })
+            .or_else(|| row.get::<usize, Option<String>>(i).ok().flatten().map(Value::Text))
+            .or_else(|| row.get::<usize, Option<bool>>(i).ok().flatten().map(Value::Bool))
+            .unwrap_or(Value::Null);
         out.push(value);
     }
     out

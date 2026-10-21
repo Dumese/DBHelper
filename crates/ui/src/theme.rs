@@ -3,7 +3,7 @@
 //! 数值取自原型《DBHelper-全国设计规范》：亮色 `#FFFFFF/#FBFBFA/#37352F/#2383E2`，
 //! 暗色 `#191919/#202020/#E9E9E7`，1px `#E9E9E7` 细边框，4px 基准间距网格。
 
-use iced::{Color, Font};
+use iced::{Color, Font, Shadow, Vector};
 
 pub const fn rgb(hex: u32) -> Color {
     Color {
@@ -46,28 +46,29 @@ pub struct Tokens {
 }
 
 impl Tokens {
+    // 严格对齐《DBHelper 设计规范》：中性色 / Accent / 语义色 / 交互态。
     pub const LIGHT: Tokens = Tokens {
         dark: false,
         bg: rgb(0xFFFFFF),
-        surface: rgb(0xFBFBFA),
+        surface: rgb(0xF7F7F5),
         soft: rgb(0xFAFAF9),
         hairline: rgb(0xE9E9E7),
         hairline_strong: rgb(0xD3D1CB),
         text: rgb(0x37352F),
         text_secondary: rgb(0x787774),
-        text_tertiary: rgb(0xA4A097),
-        accent: rgb(0x3A7FC9),
-        accent_hover: rgb(0x2E6BAF),
-        accent_pressed: rgb(0x25588C),
-        accent_soft: rgb(0xEAF2FB),
-        hover: rgb(0xF1F0EE),
-        selected: rgb(0xEDECEA),
-        success: rgb(0x3B9A67),
-        warning: rgb(0xE2A93B),
-        error: rgb(0xC2453D),
-        success_soft: rgb(0xEDF3EC),
-        warning_soft: rgb(0xFBF3DB),
-        error_soft: rgb(0xFBECEC),
+        text_tertiary: rgb(0x9B9A97),
+        accent: rgb(0x2383E2),
+        accent_hover: rgb(0x1B6FC4),
+        accent_pressed: rgb(0x185FA8),
+        accent_soft: rgb(0xE9F2FB),
+        hover: rgb(0xEFEFEE),
+        selected: rgb(0xEDEDEC),
+        success: rgb(0x1AAE39),
+        warning: rgb(0xD95800),
+        error: rgb(0xE03131),
+        success_soft: rgb(0xE7F6EC),
+        warning_soft: rgb(0xFCEFE3),
+        error_soft: rgb(0xFBE8E8),
         overlay: rgba(0x0F0F0F, 0.45),
     };
 
@@ -78,16 +79,16 @@ impl Tokens {
         soft: rgb(0x1C1C1C),
         hairline: rgb(0x373737),
         hairline_strong: rgb(0x4A4A4A),
-        text: rgb(0xE9E9E7),
+        text: rgb(0xE8E8E7),
         text_secondary: rgb(0x9B9B9B),
         text_tertiary: rgb(0x6F6F6F),
         accent: rgb(0x2383E2),
         accent_hover: rgb(0x4C9BEE),
         accent_pressed: rgb(0x1B6FBE),
-        accent_soft: rgb(0x1B2C3D),
+        accent_soft: rgb(0x1F2D3D),
         hover: rgb(0x2C2C2C),
         selected: rgb(0x2F2F2F),
-        success: rgb(0x5DA97A),
+        success: rgb(0x4CB782),
         warning: rgb(0xD9A343),
         error: rgb(0xE5645E),
         success_soft: rgb(0x1E2B23),
@@ -135,7 +136,7 @@ pub enum Tone {
     Accent,
 }
 
-// ---- 间距（4px 基准网格）----
+// ---- 间距（4px 基准网格：4/8/12/16/24/32/48/64）----
 pub mod space {
     pub const XS: f32 = 4.0;
     pub const S: f32 = 8.0;
@@ -143,6 +144,7 @@ pub mod space {
     pub const L: f32 = 16.0;
     pub const XL: f32 = 24.0;
     pub const XXL: f32 = 32.0;
+    pub const XXXL: f32 = 48.0;
 }
 
 // ---- 圆角 ----
@@ -151,19 +153,21 @@ pub mod radius {
     pub const SM: f32 = 6.0;
     pub const MD: f32 = 8.0;
     pub const LG: f32 = 12.0;
+    pub const XL: f32 = 16.0;
+    pub const FULL: f32 = 9999.0;
 }
 
-// ---- 字号 ----
+// ---- 字号（设计规范：PageTitle 28/600、Section 22/600、Subheading 18/600、
+//      Body 14/400、Caption 13/400、Micro 12/500）----
 pub mod size {
-    // 与原型图（1080 逻辑宽）对齐的紧凑字阶
-    pub const PAGE: f32 = 22.0;
-    pub const H1: f32 = 18.0;
-    pub const H2: f32 = 15.0;
-    pub const H3: f32 = 14.0;
-    pub const BODY: f32 = 12.5;
-    pub const SMALL: f32 = 11.5;
-    pub const MICRO: f32 = 10.5;
-    pub const TINY: f32 = 10.0;
+    pub const PAGE: f32 = 26.0;
+    pub const H1: f32 = 22.0;
+    pub const H2: f32 = 18.0;
+    pub const H3: f32 = 15.0;
+    pub const BODY: f32 = 14.0;
+    pub const SMALL: f32 = 13.0;
+    pub const MICRO: f32 = 12.0;
+    pub const TINY: f32 = 11.0;
 }
 
 /// 界面字体族：Windows 上 "Inter" 未安装时由 cosmic-text 回退到系统无衬线体。
@@ -197,4 +201,13 @@ pub fn bold(font: Font) -> Font {
 
 pub fn medium(font: Font) -> Font {
     Font { weight: iced::font::Weight::Medium, ..font }
+}
+
+/// 按规范的三档阴影：color rgba(15,15,15,0.05)，offset/blur 递增。
+pub fn elevation(level: u8) -> Shadow {
+    match level {
+        1 => Shadow { color: rgba(0x0F0F0F, 0.05), offset: Vector::new(0.0, 1.0), blur_radius: 3.0 },
+        2 => Shadow { color: rgba(0x0F0F0F, 0.05), offset: Vector::new(0.0, 2.0), blur_radius: 9.0 },
+        _ => Shadow { color: rgba(0x0F0F0F, 0.05), offset: Vector::new(0.0, 1.0), blur_radius: 1.0 },
+    }
 }

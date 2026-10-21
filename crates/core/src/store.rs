@@ -122,7 +122,10 @@ impl Store {
             .await
             .ok()
             .flatten();
-        let id = max.map(|m| m.0).unwrap_or(0) + 1;
+        // 取「数据库已存最大 id」与「内存自增计数器」的较大者 +1，避免并发/重启后撞 id。
+        let db_max = max.map(|m| m.0).unwrap_or(0);
+        let stored = self.next_id.load(std::sync::atomic::Ordering::Relaxed);
+        let id = std::cmp::max(db_max, stored) + 1;
         self.next_id.store(id + 1, std::sync::atomic::Ordering::Relaxed);
         id
     }
