@@ -30,7 +30,7 @@ pub fn titlebar<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     };
 
     let left = row![
-        icon(Icon::Fox, 17.0, crate::theme::rgb(0xD9730D)),
+        crate::icons::fox_logo(18.0),
         kit::gap(8.0, 1.0),
         text("DBHelper").size(ctx.f(13.0)).font(ctx.ui_bold()).color(t.text),
         kit::gap(10.0, 1.0),

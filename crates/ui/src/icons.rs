@@ -5,7 +5,6 @@ use iced::{mouse, Color, Element, Length, Point, Rectangle, Renderer, Theme};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icon {
-    Fox,
     Database,
     Table,
     Eye,
@@ -46,6 +45,15 @@ pub enum Icon {
     Clock,
     Server,
     User,
+}
+
+/// 产品 Logo（狐狸头）：使用设计资源位图，自带透明通道，任意尺寸清晰。
+pub fn fox_logo<'a, M: 'a>(size: f32) -> Element<'a, M> {
+    const FOX_PNG: &[u8] = include_bytes!("../assets/fox_logo.png");
+    iced::widget::image(iced::widget::image::Handle::from_bytes(FOX_PNG.to_vec()))
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .into()
 }
 
 pub fn icon<'a, M: 'a>(icon: Icon, size: f32, color: Color) -> Element<'a, M> {
@@ -103,39 +111,6 @@ impl<M> canvas::Program<M> for IconCanvas {
         };
 
         match self.icon {
-            Icon::Fox => {
-                // 极简狐狸头：双耳 + 面部 + 白色口鼻
-                let ear_l = Path::new(|b| {
-                    b.move_to(p(2.2, 2.4));
-                    b.line_to(p(6.4, 4.6));
-                    b.line_to(p(4.2, 7.4));
-                    b.close();
-                });
-                let ear_r = Path::new(|b| {
-                    b.move_to(p(13.8, 2.4));
-                    b.line_to(p(9.6, 4.6));
-                    b.line_to(p(11.8, 7.4));
-                    b.close();
-                });
-                let head = Path::new(|b| {
-                    b.move_to(p(8.0, 13.9));
-                    b.bezier_curve_to(p(3.4, 13.9), p(2.0, 9.6), p(3.0, 6.4));
-                    b.bezier_curve_to(p(4.6, 4.2), p(11.4, 4.2), p(13.0, 6.4));
-                    b.bezier_curve_to(p(14.0, 9.6), p(12.6, 13.9), p(8.0, 13.9));
-                });
-                let fox = crate::theme::rgb(0xD9730D);
-                frame.fill(&ear_l, fox);
-                frame.fill(&ear_r, fox);
-                frame.fill(&head, fox);
-                let muzzle = Path::new(|b| {
-                    b.move_to(p(8.0, 13.4));
-                    b.bezier_curve_to(p(5.6, 11.4), p(6.6, 9.2), p(8.0, 9.2));
-                    b.bezier_curve_to(p(9.4, 9.2), p(10.4, 11.4), p(8.0, 13.4));
-                });
-                frame.fill(&muzzle, Color::WHITE);
-                frame.fill(&Path::circle(p(6.1, 8.3), 0.75 * k), Color::WHITE);
-                frame.fill(&Path::circle(p(9.9, 8.3), 0.75 * k), Color::WHITE);
-            }
             Icon::Database => {
                 let top = Path::new(|b| {
                     b.move_to(p(2.5, 4.2));

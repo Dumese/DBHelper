@@ -9,6 +9,14 @@ use dbhelper_ui::App;
 use iced::window;
 use iced::Size;
 
+/// 从内嵌的 Logo PNG 解码窗口图标（任务栏 / 标题栏 / Alt-Tab）。
+fn window_icon() -> Option<window::icon::Icon> {
+    const FOX_PNG: &[u8] = include_bytes!("../assets/fox_logo.png");
+    let img = image::load_from_memory(FOX_PNG).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    window::icon::from_rgba(img.into_raw(), w, h).ok()
+}
+
 fn main() -> iced::Result {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--uninstall") {
@@ -25,6 +33,7 @@ fn main() -> iced::Result {
             transparent: false,
             resizable: true,
             position: window::Position::Centered,
+            icon: window_icon(),
             ..Default::default()
         })
         .theme(App::theme)
