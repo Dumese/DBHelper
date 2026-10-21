@@ -7,6 +7,7 @@ pub mod i18n;
 pub mod icons;
 pub mod kit;
 pub mod perf;
+pub mod platform;
 pub mod state;
 pub mod theme;
 pub mod update;
@@ -38,6 +39,38 @@ static PROBE: std::sync::OnceLock<std::sync::Mutex<WinProbe>> = std::sync::OnceL
 /// 正在进行的边缘缩放：方向、按下时的光标、窗口尺寸与位置。
 static RESIZE: std::sync::OnceLock<std::sync::Mutex<Option<ResizeState>>> = std::sync::OnceLock::new();
 
+/// 连接树中各连接行的屏幕位置（用于右键菜单命中判定）。
+///
+/// 视图渲染时写入，鼠标右键时按 Y 坐标反查命中的连接——
+/// 这样即使事件被 scrollable 消费，也能在应用层完成命中判定。
+#[derive(Debug, Clone, Copy)]
+pub struct ConnRowHit {
+    pub id: dbhelper_models::ConnId,
+    pub y: f32,
+    pub height: f32,
+}
+
+static CONN_ROWS: std::sync::OnceLock<std::sync::Mutex<Vec<ConnRowHit>>> = std::sync::OnceLock::new();
+
+fn conn_rows() -> &'static std::sync::Mutex<Vec<ConnRowHit>> {
+    CONN_ROWS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// 记录连接行的屏幕位置（视图渲染时调用）。
+pub fn record_conn_rows(rows: Vec<ConnRowHit>) {
+    if let Ok(mut r) = conn_rows().lock() {
+        *r = rows;
+    }
+}
+
+/// 按 Y 坐标查找命中的连接行。
+pub fn conn_row_at(y: f32) -> Option<dbhelper_models::ConnId> {
+    let r = conn_rows().lock().ok()?;
+    r.iter()
+        .find(|row| y >= row.y && y < row.y + row.height)
+        .map(|row| row.id)
+}
+
 #[derive(Clone, Copy)]
 pub struct ResizeState {
     pub dir: iced::window::Direction,
@@ -51,6 +84,22 @@ fn resize_state() -> &'static std::sync::Mutex<Option<ResizeState>> {
 }
 
 /// 供 update 读取当前光标与窗口尺寸。
+/// 调试日志：写入临时文件。
+///
+/// GUI 子系统（`windows_subsystem = "windows"`）下 stderr 不可用，
+/// 因此诊断信息落到 `%TEMP%/dbhelper_diag.log`。
+pub fn diag(msg: &str) {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("dbhelper_diag.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
+
 pub fn probe_snapshot() -> (iced::Point, iced::Size) {
     let p = probe().lock().unwrap();
     (p.cursor, p.size)
@@ -104,6 +153,12 @@ pub struct App {
     pub monitor: MonitorState,
     pub settings_ui: SettingsUi,
     pub conn_ui: ConnUi,
+    pub conn_menu: crate::state::ConnMenuState,
+    /// 光标在连接列表区内的相对 Y（逻辑像素），用于右键命中判定。
+    pub conn_list_cursor_y: f32,
+    /// 连接列表每行高度（逻辑像素）。
+    pub conn_row_h: f32,
+    pub history_ui: crate::state::HistoryUi,
     pub designer: DesignerState,
     pub dash: DashState,
     pub transfer: TransferState,
@@ -138,6 +193,8 @@ pub enum Msg {
     WindowDrag,
     WindowMinimize,
     WindowReady(Option<iced::window::Id>),
+    /// 窗口创建完成（来自 iced::window::events()），此时可安全取 HWND。
+    WindowOpened(iced::window::Id),
     ViewportResized(iced::Size),
     ResizeReady(iced::window::Direction, iced::Point, iced::Size, Option<iced::Point>),
     ResizeTo((iced::Size, iced::Point)),
@@ -166,6 +223,31 @@ pub enum Msg {
     RefreshTree,
     ConnMenu(ConnId),
     DeleteConnection(ConnId),
+    // ---- 连接树右键菜单 ----
+    /// 右键命中某个连接（在指定坐标弹出菜单）。
+    ConnContextOpen(ConnId, f32, f32),
+    /// 连接行右键按下（坐标在 update 里从全局光标位置读取）。
+    ConnContextRight(ConnId),
+    /// 连接列表区右键按下（命中判定用列表内相对坐标）。
+    ConnContextHit,
+    /// 光标在连接列表区移动（记录相对 Y，供右键命中判定）。
+    ConnContextMove(f32, f32),
+    /// 关闭右键菜单。
+    ConnContextClose,
+    /// 编辑连接（打开向导并回填）。
+    ConnEdit(ConnId),
+    /// 复制连接（生成副本并保存）。
+    ConnDuplicate(ConnId),
+    /// 为该连接新建查询页。
+    ConnNewQuery(ConnId),
+    /// 打开该连接的命令行界面。
+    ConnCli(ConnId),
+    /// 刷新该连接的对象树。
+    ConnRefresh(ConnId),
+    /// 复制连接完成。
+    ConnDuplicated(dbhelper_models::ConnectionConfig),
+    /// 复制连接失败。
+    ConnDuplicateFailed(String),
 
     // 向导
     WizardOpen,
@@ -378,6 +460,10 @@ pub enum Msg {
     // 通用
     ToastClose(usize),
     DismissModal,
+    ShowAbout,
+    ShowShortcuts,
+    ShowHistory,
+    HistoryLoaded(Result<Vec<dbhelper_models::HistoryEntry>, String>),
     ConfirmRun,
     CancelConfirm,
     CopyText(String),
@@ -487,6 +573,10 @@ impl App {
             monitor: MonitorState::default(),
             settings_ui: SettingsUi::default(),
             conn_ui: ConnUi::default(),
+            conn_menu: crate::state::ConnMenuState::default(),
+            conn_list_cursor_y: 0.0,
+            conn_row_h: 30.0,
+            history_ui: crate::state::HistoryUi::default(),
             designer: DesignerState::default(),
             dash: DashState::default(),
             transfer: TransferState::default(),
@@ -545,6 +635,11 @@ impl App {
         }
     }
 
+    /// 当前是否为深色主题（决定窗口边框色）。
+    pub fn is_dark(&self) -> bool {
+        self.settings.theme == ThemeMode::Dark
+    }
+
     pub fn default_font(&self) -> Font {
         self.ctx().ui
     }
@@ -561,6 +656,12 @@ impl App {
                     p.size = size;
                 }
                 Msg::ViewportResized(size)
+            }));
+            // 窗口创建事件：此时 HWND 已可用，可安全应用平台边框规范
+            // （Win11 系统圆角 / Win10 直角）。
+            subs.push(iced::window::events().filter_map(|(id, event)| match event {
+                iced::window::Event::Opened { .. } => Some(Msg::WindowOpened(id)),
+                _ => None,
             }));
             subs.push(iced::event::listen_with(|event, _status, _id| match event {
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {

@@ -3,7 +3,7 @@
 use crate::icons::{icon, Icon};
 use crate::kit::{self, Ctx};
 use crate::state::ErNode;
-use crate::theme::{radius, size as ts, space, Tone};
+use crate::theme::{control, radius, size as ts, space, Tone};
 use crate::widgets::chart::LineChart;
 use crate::{App, Msg};
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
@@ -614,5 +614,5 @@ fn slow_panel<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 }
 
 pub fn _icon() -> Element<'static, Msg> {
-    icon(Icon::Chart, 12.0, Color::BLACK)
+    icon(Icon::Chart, control::ICON_SM, Color::BLACK)
 }

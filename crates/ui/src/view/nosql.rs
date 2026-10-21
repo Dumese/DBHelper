@@ -2,7 +2,7 @@
 
 use crate::icons::Icon;
 use crate::kit::{self, Ctx};
-use crate::theme::{radius, size as ts, space, Tone};
+use crate::theme::{control, radius, size as ts, space, Tone};
 use crate::{App, Msg};
 use iced::widget::{column, container, row, scrollable, text_editor, Space};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Theme};
@@ -19,7 +19,7 @@ fn error_banner<'a>(ctx: Ctx, err: &str, retry: Msg) -> Element<'a, Msg> {
     let t = ctx.t;
     container(
         row![
-            crate::icons::icon(Icon::Close, 13.0, t.error),
+            crate::icons::icon(Icon::Close, control::ICON_SM, t.error),
             kit::txt(ctx, err.to_string(), ts::SMALL, t.error),
             kit::hspace(),
             kit::secondary(ctx, "重试", retry),

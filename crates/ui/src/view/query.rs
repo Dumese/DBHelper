@@ -3,7 +3,7 @@
 use crate::icons::Icon;
 use crate::kit::{self, Ctx};
 use crate::state::ResultTab;
-use crate::theme::{radius, size as ts, space};
+use crate::theme::{control, radius, size as ts, space};
 use crate::widgets::{editor::Editor, grid};
 use crate::{App, Msg};
 use iced::widget::{column, container, row, scrollable, text, Space};
@@ -241,7 +241,7 @@ fn grid_body<'a>(tab: &'a crate::state::QueryTab, ctx: Ctx, width: f32) -> Eleme
                 t.text_tertiary
             ),
             kit::hspace(),
-            kit::icon_button(ctx, Icon::ChevronRight, 11.0, t.text_tertiary, Msg::Noop),
+            kit::icon_button(ctx, Icon::ChevronRight, control::ICON, t.text_tertiary, Msg::Noop),
             kit::txt(
                 ctx,
                 format!("{} / {}", tab.page + 1, tab.page_count().max(1)),

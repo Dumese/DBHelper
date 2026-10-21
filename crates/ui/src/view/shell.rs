@@ -3,7 +3,7 @@
 use crate::icons::{icon, Icon};
 use crate::kit::{self, Ctx};
 use crate::state::{Page, Sidebar, TabKind};
-use crate::theme::{radius, size as ts, space, Tokens, Tone};
+use crate::theme::{control, radius, size as ts, space, Tokens, Tone};
 use crate::{App, Msg};
 use dbhelper_models::*;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text, Space};
@@ -35,13 +35,21 @@ pub fn titlebar<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     };
 
     let left = row![
-        crate::icons::fox_logo(18.0),
-        kit::gap(8.0, 1.0),
-        text("DBHelper").size(ctx.f(13.0)).font(ctx.ui_bold()).color(t.text),
+        crate::icons::fox_logo(22.0),
         kit::gap(10.0, 1.0),
-        kit::vline(ctx, 14.0),
-        kit::gap(10.0, 1.0),
-        text(title).size(ctx.f(13.0)).font(ctx.ui).color(t.text_secondary),
+        text("DBHelper")
+            .size(ctx.f(ts::BODY))
+            .font(ctx.ui_bold())
+            .line_height(1.3)
+            .color(t.text),
+        kit::gap(12.0, 1.0),
+        kit::vline(ctx, 16.0),
+        kit::gap(12.0, 1.0),
+        text(title)
+            .size(ctx.f(ts::BODY))
+            .font(ctx.ui)
+            .line_height(1.3)
+            .color(t.text_secondary),
     ]
     .align_y(Alignment::Center);
 
@@ -50,23 +58,23 @@ pub fn titlebar<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         win_btn(ctx, Icon::Square, Msg::WindowMaximize, false),
         win_btn(ctx, Icon::Close, Msg::WindowClose, true),
     ]
-    .spacing(2);
+    .spacing(0);
 
     // 拖拽区只覆盖左侧留白，窗口按钮不再被 mouse_area 吞掉点击
     let drag = mouse_area(
         container(row![left, kit::hspace()])
-            .height(Length::Fixed(32.0))
+            .height(Length::Fixed(ctx.f(control::TITLEBAR_H)))
             .align_y(Alignment::Center)
-            .padding(Padding { top: 0.0, right: 6.0, bottom: 0.0, left: 12.0 }),
+            .padding(Padding { top: 0.0, right: 6.0, bottom: 0.0, left: 20.0 }),
     )
     .on_press(Msg::WindowDrag);
 
     let bar = container(
         row![drag, controls]
             .align_y(Alignment::Center)
-            .padding(Padding { top: 0.0, right: 6.0, bottom: 0.0, left: 0.0 }),
+            .padding(Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 0.0 }),
     )
-    .height(Length::Fixed(32.0))
+    .height(Length::Fixed(ctx.f(control::TITLEBAR_H)))
     .align_y(Alignment::Center)
     .width(Length::Fill)
     .style(move |_: &Theme| container::Style {
@@ -78,22 +86,45 @@ pub fn titlebar<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     bar.into()
 }
 
+/// 标题栏窗口按钮。
+///
+/// Windows 11 规范的标题栏按钮为 46×32（宽固定、贴窗口右缘）；
+/// 这里同时保证图标为 16px（此前 12px 偏小），关闭按钮 hover 时
+/// 显示系统红底，形状为「左直角、右上/右下圆角」以贴合 Win11 圆角窗口。
 fn win_btn<'a>(ctx: Ctx, ic: Icon, msg: Msg, danger: bool) -> Element<'a, Msg> {
     let t = ctx.t;
-    button(icon(ic, 12.0, t.text_secondary))
-        .padding(Padding { top: 6.0, right: 9.0, bottom: 6.0, left: 9.0 })
-        .style(move |_: &Theme, status| button::Style {
-            background: Some(
-                match status {
-                    button::Status::Hovered if danger => t.error,
-                    button::Status::Hovered => t.hover,
-                    _ => Color::TRANSPARENT,
+    button(icon(ic, ctx.f(control::ICON_SM), t.text_secondary))
+        .width(Length::Fixed(ctx.f(control::WIN_BTN_W)))
+        .height(Length::Fixed(ctx.f(control::WIN_BTN_H)))
+        .padding(Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 0.0 })
+        .style(move |_: &Theme, status| {
+            let hovered = matches!(status, button::Status::Hovered);
+            let radius = if danger {
+                // 关闭按钮：右上/右下圆角，贴合 Win11 窗口圆角。
+                iced::border::Radius {
+                    top_left: 0.0.into(),
+                    top_right: radius::SM.into(),
+                    bottom_right: radius::SM.into(),
+                    bottom_left: 0.0.into(),
                 }
-                .into(),
-            ),
-            text_color: t.text,
-            border: Border::default().rounded(radius::XS),
-            ..Default::default()
+            } else {
+                iced::border::Radius::default()
+            };
+            button::Style {
+                background: Some(
+                    if hovered && danger {
+                        t.error
+                    } else if hovered {
+                        t.hover
+                    } else {
+                        Color::TRANSPARENT
+                    }
+                    .into(),
+                ),
+                text_color: if hovered && danger { Color::WHITE } else { t.text_secondary },
+                border: Border { radius, ..Default::default() },
+                ..Default::default()
+            }
         })
         .on_press(msg)
         .into()
@@ -235,12 +266,12 @@ pub fn breadcrumb<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     // 未选中连接时，这些入口由 update 侧给出提示，避免误用 id=0 的连接
     let active = app.active_conn.unwrap_or_default();
     let actions: Element<Msg> = row![
-        kit::icon_button(ctx, Icon::Refresh, 12.5, t.text_secondary, Msg::RefreshTree),
-        kit::icon_button(ctx, Icon::Chart, 12.5, t.text_secondary, Msg::DashOpen(active)),
-        kit::icon_button(ctx, Icon::Download, 12.5, t.text_secondary, Msg::ImportOpen),
-        kit::icon_button(ctx, Icon::Save, 12.5, t.text_secondary, Msg::TransferOpen),
-        kit::icon_button(ctx, Icon::Lock, 12.5, t.text_secondary, Msg::AdminOpen(active)),
-        kit::icon_button(ctx, Icon::More, 12.5, t.text_secondary, Msg::ConnMenu(0)),
+        kit::icon_button(ctx, Icon::Refresh, control::ICON, t.text_secondary, Msg::RefreshTree),
+        kit::icon_button(ctx, Icon::Chart, control::ICON, t.text_secondary, Msg::DashOpen(active)),
+        kit::icon_button(ctx, Icon::Download, control::ICON, t.text_secondary, Msg::ImportOpen),
+        kit::icon_button(ctx, Icon::Save, control::ICON, t.text_secondary, Msg::TransferOpen),
+        kit::icon_button(ctx, Icon::Lock, control::ICON, t.text_secondary, Msg::AdminOpen(active)),
+        kit::icon_button(ctx, Icon::More, control::ICON, t.text_secondary, Msg::ConnMenu(0)),
     ]
     .spacing(2)
     .into();
@@ -295,7 +326,7 @@ pub fn tabbar<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         );
     }
     r = r.push(
-        button(icon(Icon::Plus, 12.0, t.text_secondary))
+        button(icon(Icon::Plus, control::ICON_SM, t.text_secondary))
             .padding(Padding { top: 4.0, right: 6.0, bottom: 4.0, left: 6.0 })
             .height(Length::Fixed(24.0))
             .style(move |_: &Theme, status| button::Style {
@@ -334,14 +365,35 @@ pub fn sidebar<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         _ => connection_tree(app, ctx),
     };
 
-    column![
+    // 右键捕获层：包裹**整个侧栏**（在 scrollable 之外）。
+    //
+    // 为什么必须在 scrollable 之外：scrollable 内部会消费鼠标事件用于
+    // 滚动，右键传不到内部的行控件；包在侧栏顶层则能稳定收到，
+    // 并且 `on_move` 给出的相对 Y 可直接换算成列表内行号。
+    let row_h = ctx.f(control::TREE_ROW_H);
+    let conn_page = matches!(
+        app.page,
+        Page::Connections | Page::Query | Page::Data | Page::Er | Page::Monitor
+    );
+
+    let inner = column![
         body,
         kit::hspace(),
         vault_footer(app, ctx)
     ]
-        .width(Length::Fixed(240.0))
-        .height(Length::Fill)
-        .into()
+    .width(Length::Fixed(240.0))
+    .height(Length::Fill);
+
+    if conn_page {
+        // 连接列表的顶部偏移：分组头（连接）+ 搜索框
+        let list_top = row_h + ctx.f(28.0) + 12.0;
+        mouse_area(inner)
+            .on_right_press(Msg::ConnContextHit)
+            .on_move(move |pos| Msg::ConnContextMove(pos.y - list_top, row_h))
+            .into()
+    } else {
+        inner.into()
+    }
 }
 
 fn sidebar_header<'a>(ctx: Ctx, title: &str, add: Option<Msg>, more: Option<Msg>) -> Element<'a, Msg> {
@@ -355,10 +407,10 @@ fn sidebar_header<'a>(ctx: Ctx, title: &str, add: Option<Msg>, more: Option<Msg>
     .align_y(Alignment::Center);
     r = r.push(kit::hspace());
     if let Some(m) = add {
-        r = r.push(kit::icon_button(ctx, Icon::Plus, 13.0, t.text_secondary, m));
+        r = r.push(kit::icon_button(ctx, Icon::Plus, control::ICON, t.text_secondary, m));
     }
     if let Some(m) = more {
-        r = r.push(kit::icon_button(ctx, Icon::More, 13.0, t.text_secondary, m));
+        r = r.push(kit::icon_button(ctx, Icon::More, control::ICON, t.text_secondary, m));
     }
     container(r)
         .padding(Padding { top: 10.0, right: 10.0, bottom: 6.0, left: 14.0 })
@@ -445,6 +497,7 @@ fn connection_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
     let search = kit::search_field(ctx, tr.search_conns(), &app.search, Msg::SearchChanged);
 
+
     column![
         sidebar_header(
             ctx,
@@ -465,9 +518,9 @@ fn group_row<'a>(ctx: Ctx, name: &str, count: usize, open: bool, key: String) ->
     button(
         row![
             if open {
-                icon(Icon::ChevronDown, 10.0, t.text_tertiary)
+                icon(Icon::ChevronDown, control::ICON_SM, t.text_tertiary)
             } else {
-                icon(Icon::ChevronRight, 10.0, t.text_tertiary)
+                icon(Icon::ChevronRight, control::ICON_SM, t.text_tertiary)
             },
             text(name.to_string()).size(ctx.f(11.0)).font(ctx.ui_medium()).color(t.text_tertiary),
         ]
@@ -515,17 +568,21 @@ fn conn_row<'a>(
 
     let main = button(
         row![
-            icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, 10.0, t.text_tertiary),
-            icon(Icon::Database, 13.0, accent),
-            text(label).size(ctx.f(ts::SMALL)).font(name_font).color(t.text),
+            icon(if open { Icon::ChevronDown } else { Icon::ChevronRight }, control::ICON_SM, t.text_tertiary),
+            icon(Icon::Database, control::ICON, accent),
+            text(label)
+                .size(ctx.f(ts::BODY))
+                .font(name_font)
+                .line_height(1.3)
+                .color(t.text),
             kit::hspace(),
         ]
-        .spacing(5)
+        .spacing(6)
         .align_y(Alignment::Center)
         .padding(Padding { top: 0.0, right: 2.0, bottom: 0.0, left: 8.0 }),
     )
     .padding(0)
-    .height(Length::Fixed(28.0))
+    .height(Length::Fixed(ctx.f(control::TREE_ROW_H)))
     .width(Length::Fill)
     .style(move |_: &Theme, status| button::Style {
         background: Some(
@@ -576,6 +633,9 @@ fn conn_row<'a>(
         Space::new().width(Length::Fixed(12.0)).height(Length::Fixed(1.0)).into()
     };
 
+    // 右键：在光标处弹出连接菜单（打开/编辑/删除/复制/新建查询/命令行/刷新）。
+    // 右键由**列表区**统一捕获（scrollable 会消费行内事件），
+    // 命中判定在 update 里按行号换算，这里只需保证行高一致。
     row![main, dot_slot]
         .align_y(Alignment::Center)
         .width(Length::Fill)
@@ -598,7 +658,7 @@ fn db_row<'a>(ctx: Ctx, conn_id: ConnId, name: &str, open: bool, key: String) ->
 
     let label = button(
         row![
-            icon(Icon::Database, 12.0, t.text_secondary),
+            icon(Icon::Database, control::ICON_SM, t.text_secondary),
             text(name.to_string()).size(ctx.f(ts::SMALL)).font(ctx.ui_medium()).color(t.text),
             kit::hspace(),
         ]
@@ -699,7 +759,7 @@ fn obj_row<'a>(
         })
         .on_press(msg),
         // 对象设计器快捷入口
-        kit::icon_button(ctx, Icon::Doc, 11.0, t.text_tertiary, Msg::DesignerOpen(conn, name.to_string())),
+        kit::icon_button(ctx, Icon::Doc, control::ICON, t.text_tertiary, Msg::DesignerOpen(conn, name.to_string())),
     ]
     .align_y(Alignment::Center)
     .width(Length::Fill)
@@ -740,7 +800,7 @@ fn keyspace_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let total: u64 = dbs.iter().map(|d| d.keys).sum();
     list = list.push(
         row![
-            icon(Icon::Database, 13.0, t.error),
+            icon(Icon::Database, control::ICON_SM, t.error),
             text(format!("cache - {}", info.map(|i| i.version).unwrap_or_else(|| "Redis".into())))
                 .size(ctx.f(ts::SMALL))
                 .font(ctx.ui_medium())
@@ -754,7 +814,7 @@ fn keyspace_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         list = list.push(
             button(
                 row![
-                    icon(Icon::Folder, 12.0, t.text_secondary),
+                    icon(Icon::Folder, control::ICON_SM, t.text_secondary),
                     text(format!("db{}", row_db.db)).size(ctx.f(ts::SMALL)).font(ctx.ui).color(t.text),
                     kit::hspace(),
                     text(kit::count_label(row_db.keys as usize))
@@ -792,7 +852,7 @@ fn keyspace_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
                 list = list.push(
                     button(
                         row![
-                            icon(Icon::Key, 11.0, t.warning),
+                            icon(Icon::Key, control::ICON_SM, t.warning),
                             text(key.clone()).size(ctx.f(ts::SMALL)).font(ctx.mono).color(t.text),
                         ]
                         .spacing(6)
@@ -841,7 +901,7 @@ fn collections_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let mut list = column![].spacing(0);
     list = list.push(
         row![
-            icon(Icon::Database, 13.0, t.success),
+            icon(Icon::Database, control::ICON_SM, t.success),
             text("analytics - MongoDB").size(ctx.f(ts::SMALL)).font(ctx.ui_medium()).color(t.text),
         ]
         .spacing(6)
@@ -849,7 +909,7 @@ fn collections_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     );
     list = list.push(
         row![
-            icon(Icon::Folder, 12.0, t.text_secondary),
+            icon(Icon::Folder, control::ICON_SM, t.text_secondary),
             text(app.mongo.db.clone().unwrap_or_else(|| "appdb".into()))
                 .size(ctx.f(ts::SMALL))
                 .font(ctx.ui)
@@ -863,7 +923,7 @@ fn collections_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         list = list.push(
             button(
                 row![
-                    icon(Icon::Doc, 11.0, t.text_secondary),
+                    icon(Icon::Doc, control::ICON_SM, t.text_secondary),
                     text(name.clone()).size(ctx.f(ts::SMALL)).font(ctx.ui).color(t.text),
                     kit::hspace(),
                     text(kit::count_label(*count as usize))
@@ -911,7 +971,7 @@ fn indices_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let mut list = column![].spacing(0);
     list = list.push(
         row![
-            icon(Icon::Database, 13.0, t.warning),
+            icon(Icon::Database, control::ICON_SM, t.warning),
             text("logs - Elasticsearch").size(ctx.f(ts::SMALL)).font(ctx.ui_medium()).color(t.text),
         ]
         .spacing(6)
@@ -922,7 +982,7 @@ fn indices_tree<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         list = list.push(
             button(
                 row![
-                    icon(Icon::Chart, 11.0, if health == "green" { t.success } else { t.warning }),
+                    icon(Icon::Chart, control::ICON_SM, if health == "green" { t.success } else { t.warning }),
                     text(name.clone()).size(ctx.f(ts::SMALL)).font(ctx.ui).color(t.text),
                     kit::hspace(),
                     text(kit::count_label(*docs as usize))
@@ -1024,7 +1084,7 @@ fn vault_footer<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     };
     let bar = container(
         row![
-            icon(Icon::Shield, 12.0, t.text_secondary),
+            icon(Icon::Shield, control::ICON_SM, t.text_secondary),
             text(label).size(ctx.f(11.0)).font(ctx.ui).color(t.text_secondary),
             kit::hspace(),
             kit::icon_button(
@@ -1038,7 +1098,7 @@ fn vault_footer<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
                     ThemeMode::Dark
                 })
             ),
-            kit::icon_button(ctx, Icon::Gear, 12.0, t.text_secondary, Msg::OpenSettings),
+            kit::icon_button(ctx, Icon::Gear, control::ICON, t.text_secondary, Msg::OpenSettings),
         ]
         .spacing(6)
         .align_y(Alignment::Center)
@@ -1147,7 +1207,7 @@ pub fn toasts<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
                         .size(ctx.f(ts::SMALL))
                         .font(ctx.ui)
                         .color(t.text),
-                    kit::icon_button(ctx, Icon::Close, 10.0, t.text_tertiary, Msg::ToastClose(i)),
+                    kit::icon_button(ctx, Icon::Close, control::ICON, t.text_tertiary, Msg::ToastClose(i)),
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),

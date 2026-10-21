@@ -3,7 +3,7 @@
 use crate::icons::Icon;
 use crate::kit::{self, Ctx};
 use crate::state::{ChartCard, ChartKind, DesignerState, TransferMode};
-use crate::theme::{radius, size as ts};
+use crate::theme::{control, radius, size as ts};
 use crate::{App, Msg};
 use dbhelper_models::ConnId;
 use iced::widget::canvas::{self, Canvas, Frame, Geometry, Path, Stroke, Text};
@@ -20,7 +20,7 @@ pub fn designer_view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
     let header = container(
         row![
-            kit::icon_button(ctx, Icon::Close, 13.0, t.text_secondary, Msg::DesignerClose),
+            kit::icon_button(ctx, Icon::Close, control::ICON, t.text_secondary, Msg::DesignerClose),
             kit::txt_bold(
                 ctx,
                 if d.is_new {
@@ -636,8 +636,17 @@ pub fn import_panel<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let im = &app.import;
 
     let mut col = column![
-        kit::txt_bold(ctx, "导入数据", ts::H2, t.text),
-        kit::txt(ctx, "支持 CSV / JSON / TSV / XLSX，导入前预览 100 行。", ts::SMALL, t.text_secondary),
+        // 统一头部：标题 + 右上角关闭按钮（此前导入面板无法用鼠标关闭）
+        row![
+            column![
+                kit::txt_bold(ctx, "导入数据", ts::H2, t.text),
+                kit::txt(ctx, "支持 CSV / JSON / TSV / XLSX，导入前预览 100 行。", ts::SMALL, t.text_secondary),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            kit::icon_button(ctx, Icon::Close, control::ICON, t.text_secondary, Msg::ImportClose),
+        ]
+        .align_y(Alignment::Center),
         Space::new().width(Length::Fill).height(Length::Fixed(10.0)),
         row![
             kit::secondary(ctx, "选择文件…", Msg::ImportPickFile),

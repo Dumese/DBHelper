@@ -2,7 +2,7 @@
 
 use crate::icons::Icon;
 use crate::kit::{self, Ctx};
-use crate::theme::{radius, size as ts, space, Tone};
+use crate::theme::{control, radius, size as ts, space, Tone};
 use crate::widgets::grid;
 use crate::{App, Msg};
 use iced::widget::{column, container, row, scrollable, Space};
@@ -53,7 +53,7 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
                 ts::MICRO,
                 t.text_secondary
             ),
-            kit::icon_button(ctx, Icon::List, 13.0, t.text_secondary, Msg::DataReload),
+            kit::icon_button(ctx, Icon::List, control::ICON, t.text_secondary, Msg::DataReload),
         ]
         .spacing(8)
         .align_y(Alignment::Center)
@@ -311,7 +311,7 @@ fn data_grid<'a>(tab: &'a crate::state::DataTab, ctx: Ctx, width: f32) -> Elemen
                 t.text_tertiary
             ),
             kit::hspace(),
-            kit::icon_button(ctx, Icon::ChevronRight, 11.0, t.text_tertiary, Msg::DataPage(1)),
+            kit::icon_button(ctx, Icon::ChevronRight, control::ICON, t.text_tertiary, Msg::DataPage(1)),
             kit::txt(
                 ctx,
                 format!("{} / {}", tab.page + 1, tab.page_count().max(1)),

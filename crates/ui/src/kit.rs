@@ -5,7 +5,7 @@
 pub use crate::icons::icon;
 use crate::icons::Icon;
 use crate::i18n::Tr;
-use crate::theme::{bold, medium, radius, size as ts, space, Tone, Tokens};
+use crate::theme::{bold, medium, control, radius, size as ts, space, Tone, Tokens};
 use dbhelper_models::Language;
 use iced::widget::{mouse_area, button, checkbox as iced_checkbox, container, row, slider, text, text_input, toggler, Space};
 use iced::{
@@ -56,6 +56,8 @@ pub fn txt<'a, M: Clone + 'a>(ctx: Ctx, s: impl Into<String>, size: f32, color: 
     text(s.into())
         .size(ctx.f(size))
         .font(ctx.ui)
+        // 统一行高（1.3），保证同一行里不同字号的文字基线一致、不出现错位。
+        .line_height(1.3)
         .color(color)
         .into()
 }
@@ -64,6 +66,7 @@ pub fn txt_bold<'a, M: Clone + 'a>(ctx: Ctx, s: impl Into<String>, size: f32, co
     text(s.into())
         .size(ctx.f(size))
         .font(ctx.ui_bold())
+        .line_height(1.3)
         .color(color)
         .into()
 }
@@ -72,6 +75,7 @@ pub fn mono<'a, M: Clone + 'a>(ctx: Ctx, s: impl Into<String>, size: f32, color:
     text(s.into())
         .size(ctx.f(size))
         .font(ctx.mono)
+        .line_height(1.3)
         .color(color)
         .into()
 }
@@ -81,6 +85,7 @@ pub fn micro<'a, M: Clone + 'a>(ctx: Ctx, s: impl Into<String>, color: Color) ->
     text(s.into().to_uppercase())
         .size(ctx.f(ts::MICRO))
         .font(ctx.ui_medium())
+        .line_height(1.3)
         .color(color)
         .into()
 }
@@ -240,15 +245,17 @@ pub fn button_kind<'a, M: Clone + 'a>(
     msg: M,
 ) -> Element<'a, M> {
     let f = ctx.f(ts::BODY);
-    let (pt, pb, pl, pr) = match kind {
-        BtnKind::Primary => (6.0, 6.0, 14.0, 14.0),
-        BtnKind::Secondary => (5.0, 5.0, 12.0, 12.0),
-        _ => (4.0, 4.0, 8.0, 8.0),
+    // Notion 规格：medium 按钮高 28px，水平内边距 12px；primary 用 14px 字号。
+    let (h, pl, pr) = match kind {
+        BtnKind::Primary => (control::BTN_H, 12.0, 12.0),
+        BtnKind::Secondary => (control::BTN_H, 12.0, 12.0),
+        _ => (control::BTN_H, 8.0, 8.0),
     };
     button(
         text(label.into())
             .size(f)
             .font(ctx.ui_medium())
+            .line_height(1.25)
             .color(match kind {
                 BtnKind::Primary => Color::WHITE,
                 BtnKind::DangerLink => ctx.t.error,
@@ -256,7 +263,9 @@ pub fn button_kind<'a, M: Clone + 'a>(
                 _ => ctx.t.text,
             }),
     )
-    .padding(Padding { top: pt, right: pr, bottom: pb, left: pl })
+    // 固定高度 + 垂直居中，避免不同文案长度导致按钮高度抖动、与相邻元素错位。
+    .height(Length::Fixed(ctx.f(h)))
+    .padding(Padding { top: 0.0, right: ctx.f(pr), bottom: 0.0, left: ctx.f(pl) })
     .style(move |_: &Theme, status| btn_style(kind, ctx, status))
     .on_press(msg)
     .into()
@@ -283,6 +292,10 @@ pub fn danger_link<'a, M: Clone + 'a>(ctx: Ctx, label: impl Into<String>, msg: M
 }
 
 /// 纯图标按钮（工具条 / 标题栏）。
+///
+/// Notion 规格：点击区 28×28（medium），图标 16px。点击区独立于图标尺寸，
+/// 保证图标放大后仍有足够的可点区域，也保证不同图标的按钮**彼此对齐**
+/// （此前按图标尺寸 + padding 计算宽度，导致大小图标按钮参差不齐）。
 pub fn icon_button<'a, M: Clone + 'a>(
     ctx: Ctx,
     ic: Icon,
@@ -290,8 +303,23 @@ pub fn icon_button<'a, M: Clone + 'a>(
     color: Color,
     msg: M,
 ) -> Element<'a, M> {
+    icon_button_sized(ctx, ic, size, color, control::ICON_BTN, msg)
+}
+
+/// 同 `icon_button`，但可指定点击区边长（Notion small/medium/large）。
+pub fn icon_button_sized<'a, M: Clone + 'a>(
+    ctx: Ctx,
+    ic: Icon,
+    size: f32,
+    color: Color,
+    hit: f32,
+    msg: M,
+) -> Element<'a, M> {
+    let hit = ctx.f(hit);
     button(icon(ic, ctx.f(size), color))
-        .padding(Padding { top: 4.0, right: 4.0, bottom: 4.0, left: 4.0 })
+        .width(Length::Fixed(hit))
+        .height(Length::Fixed(hit))
+        .padding(Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 0.0 })
         .style(move |_: &Theme, status| {
             let bg = match status {
                 button::Status::Hovered => ctx.t.hover,
@@ -301,7 +329,7 @@ pub fn icon_button<'a, M: Clone + 'a>(
             button::Style {
                 background: Some(bg.into()),
                 text_color: ctx.t.text,
-                border: Border::default().rounded(radius::XS),
+                border: Border::default().rounded(radius::SM),
                 ..Default::default()
             }
         })
@@ -318,20 +346,22 @@ pub fn primary_with_hint<'a, M: Clone + 'a>(
     hint: &str,
     msg: M,
 ) -> Element<'a, M> {
+    let h = ctx.f(control::BTN_H);
     button(
         row![
-            icon(ic, ctx.f(11.0), Color::WHITE),
+            icon(ic, ctx.f(control::ICON_SM), Color::WHITE),
             text(label.into())
-                .size(ctx.f(ts::SMALL))
+                .size(ctx.f(ts::BODY))
                 .font(ctx.ui_medium())
+                .line_height(1.25)
                 .color(Color::WHITE),
             txt(ctx, hint.to_string(), ts::MICRO, Color { a: 0.72, ..Color::WHITE }),
         ]
         .spacing(6)
         .align_y(Alignment::Center),
     )
-    .padding(Padding { top: 5.0, right: 10.0, bottom: 5.0, left: 10.0 })
-    .height(Length::Fixed(28.0))
+    .height(Length::Fixed(h))
+    .padding(Padding { top: 0.0, right: 10.0, bottom: 0.0, left: 10.0 })
     .style(move |_: &Theme, status| btn_style(BtnKind::Primary, ctx, status))
     .on_press(msg)
     .into()
@@ -343,13 +373,21 @@ pub fn primary_icon<'a, M: Clone + 'a>(
     label: impl Into<String>,
     msg: M,
 ) -> Element<'a, M> {
-    let f = ctx.f(ts::BODY);
+    let h = ctx.f(control::BTN_H);
     button(
-        row![icon(ic, ctx.f(12.0), Color::WHITE), txt(ctx, label, ts::BODY, Color::WHITE)]
-            .spacing(6)
-            .align_y(Alignment::Center),
+        row![
+            icon(ic, ctx.f(control::ICON_SM), Color::WHITE),
+            text(label.into())
+                .size(ctx.f(ts::BODY))
+                .font(ctx.ui_medium())
+                .line_height(1.25)
+                .color(Color::WHITE),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
     )
-    .padding(Padding { top: 6.0, right: 14.0, bottom: 6.0, left: 12.0 })
+    .height(Length::Fixed(h))
+    .padding(Padding { top: 0.0, right: 12.0, bottom: 0.0, left: 12.0 })
     .style(move |_: &Theme, status| btn_style(BtnKind::Primary, ctx, status))
     .on_press(msg)
     .into()
@@ -382,13 +420,20 @@ pub fn input<'a, M: Clone + 'a>(
     value: &str,
     on_input: impl Fn(String) -> M + 'a,
 ) -> Element<'a, M> {
-    text_input(placeholder, value)
-        .on_input(on_input)
-        .size(ctx.f(ts::BODY))
-        .font(ctx.ui)
-        .padding(Padding { top: 5.0, right: 8.0, bottom: 5.0, left: 8.0 })
-        .style(move |_: &Theme, status| input_style(ctx, status))
-        .into()
+    let h = ctx.f(control::BTN_H);
+    container(
+        text_input(placeholder, value)
+            .on_input(on_input)
+            .size(ctx.f(ts::BODY))
+            .font(ctx.ui)
+            .line_height(1.25)
+            .padding(Padding { top: 0.0, right: 8.0, bottom: 0.0, left: 8.0 })
+            .style(move |_: &Theme, status| input_style(ctx, status))
+            .width(Length::Fill),
+    )
+    .height(Length::Fixed(h))
+    .width(Length::Fill)
+    .into()
 }
 
 pub fn input_mono<'a, M: Clone + 'a>(
@@ -397,13 +442,20 @@ pub fn input_mono<'a, M: Clone + 'a>(
     value: &str,
     on_input: impl Fn(String) -> M + 'a,
 ) -> Element<'a, M> {
-    text_input(placeholder, value)
-        .on_input(on_input)
-        .size(ctx.f(ts::SMALL))
-        .font(ctx.mono)
-        .padding(Padding { top: 5.0, right: 8.0, bottom: 5.0, left: 8.0 })
-        .style(move |_: &Theme, status| input_style(ctx, status))
-        .into()
+    let h = ctx.f(control::BTN_H);
+    container(
+        text_input(placeholder, value)
+            .on_input(on_input)
+            .size(ctx.f(ts::SMALL))
+            .font(ctx.mono)
+            .line_height(1.25)
+            .padding(Padding { top: 0.0, right: 8.0, bottom: 0.0, left: 8.0 })
+            .style(move |_: &Theme, status| input_style(ctx, status))
+            .width(Length::Fill),
+    )
+    .height(Length::Fixed(h))
+    .width(Length::Fill)
+    .into()
 }
 
 /// 下拉框（关闭态）：白底、1px 描边、6px 圆角。
@@ -449,11 +501,12 @@ pub fn search_field<'a, M: Clone + 'a>(
 ) -> Element<'a, M> {
     container(
         row![
-            icon(Icon::Search, ctx.f(13.0), ctx.t.text_tertiary),
+            icon(Icon::Search, ctx.f(control::ICON_SM), ctx.t.text_tertiary),
             text_input(placeholder, value)
                 .on_input(on_input)
                 .size(ctx.f(ts::SMALL))
                 .font(ctx.ui)
+                .line_height(1.3)
                 .padding(Padding { top: 0.0, right: 0.0, bottom: 0.0, left: 0.0 })
                 .style(move |_: &Theme, _status| text_input::Style {
                     background: Color::TRANSPARENT.into(),
@@ -465,12 +518,12 @@ pub fn search_field<'a, M: Clone + 'a>(
                 })
                 .width(Length::Fill),
         ]
-        .spacing(5)
+        .spacing(6)
         .align_y(Alignment::Center),
     )
-    .padding(Padding { top: 4.0, right: 8.0, bottom: 4.0, left: 8.0 })
+    .padding(Padding { top: 0.0, right: 8.0, bottom: 0.0, left: 8.0 })
     .width(Length::Fill)
-    .height(Length::Fixed(28.0))
+    .height(Length::Fixed(ctx.f(control::BTN_H)))
     .style(move |_: &Theme| container::Style {
         background: Some(ctx.t.hover.into()),
         border: Border::default().rounded(radius::SM),
@@ -535,11 +588,16 @@ pub fn checkbox<'a, M: Clone + 'a>(
 }
 
 /// 分段控件（浅色底槽 + 选中项白底）。
+///
+/// 此前用 `mouse_area` + 内边距撑开，chip 高度随字号变化、与相邻控件错位，
+/// 且文字在窄容器里会被截断（设置页「Sans / Serif」即因此显示不全）。
+/// 现在：统一 28px 行高、水平内边距 10px、chip 固定高度，文字不再被裁切。
 pub fn segmented<'a, M: Clone + 'a>(
     ctx: Ctx,
     options: &[(&str, bool)],
     on_pick: impl Fn(usize) -> M + 'a,
 ) -> Element<'a, M> {
+    let chip_h = ctx.f(control::BTN_H - 4.0);
     let mut row = iced::widget::Row::new().spacing(2).align_y(Alignment::Center);
     for (i, (label, active)) in options.iter().enumerate() {
         let active = *active;
@@ -550,9 +608,13 @@ pub fn segmented<'a, M: Clone + 'a>(
             text((*label).to_string())
                 .size(ctx.f(ts::SMALL))
                 .font(if active { ctx.ui_medium() } else { ctx.ui })
+                .line_height(1.3)
                 .color(if active { ctx.t.text } else { ctx.t.text_secondary }),
         )
-        .padding(Padding { top: 3.0, right: 10.0, bottom: 3.0, left: 10.0 })
+        .height(Length::Fixed(chip_h))
+        .padding(Padding { top: 0.0, right: 10.0, bottom: 0.0, left: 10.0 })
+        .center_x(Length::Shrink)
+        .center_y(Length::Fixed(chip_h))
         .style(move |_: &Theme| container::Style {
             background: Some(if active { ctx.t.bg } else { Color::TRANSPARENT }.into()),
             border: Border {
@@ -565,7 +627,8 @@ pub fn segmented<'a, M: Clone + 'a>(
         row = row.push(mouse_area(chip).on_press(msg));
     }
     container(row)
-        .padding(2)
+        .height(Length::Fixed(ctx.f(control::BTN_H)))
+        .padding(Padding { top: 2.0, right: 2.0, bottom: 2.0, left: 2.0 })
         .style(move |_: &Theme| container::Style {
             background: Some(ctx.t.hover.into()),
             border: Border::default().rounded(radius::SM),
@@ -600,12 +663,13 @@ pub fn filter_chip<'a, M: Clone + 'a>(
     button(
         row![
             txt(ctx, label, ts::MICRO, ctx.t.text),
-            icon(Icon::Close, ctx.f(9.0), ctx.t.text_secondary)
+            icon(Icon::Close, ctx.f(control::ICON_SM - 2.0), ctx.t.text_secondary)
         ]
         .spacing(5)
         .align_y(Alignment::Center),
     )
-    .padding(Padding { top: 2.0, right: 6.0, bottom: 2.0, left: 7.0 })
+    .height(Length::Fixed(ctx.f(control::BTN_H - 4.0)))
+    .padding(Padding { top: 0.0, right: 8.0, bottom: 0.0, left: 8.0 })
     .style(move |_: &Theme, status| {
         let bg = match status {
             button::Status::Hovered => ctx.t.selected,
@@ -614,7 +678,7 @@ pub fn filter_chip<'a, M: Clone + 'a>(
         button::Style {
             background: Some(bg.into()),
             text_color: ctx.t.text,
-            border: Border { color: ctx.t.hairline, width: 1.0, radius: radius::XS.into() },
+            border: Border { color: ctx.t.hairline, width: 1.0, radius: radius::SM.into() },
             shadow: Shadow::default(),
             snap: true,
         }
@@ -649,7 +713,8 @@ pub fn counter_tab<'a, M: Clone + 'a>(
         .spacing(5)
         .align_y(Alignment::Center),
     )
-    .padding(Padding { top: 7.0, right: 10.0, bottom: 7.0, left: 10.0 })
+    .height(Length::Fixed(ctx.f(control::BTN_H)))
+    .padding(Padding { top: 0.0, right: 10.0, bottom: 0.0, left: 10.0 })
     .style(move |_: &Theme, status| {
         let bg = if active {
             ctx.t.bg
@@ -754,7 +819,7 @@ pub fn empty_state<'a, M: Clone + 'a>(
         .spacing(space::S)
         .align_x(Alignment::Center)
         .width(Length::Fill);
-    col = col.push(icon(ic, 28.0, ctx.t.text_tertiary));
+    col = col.push(icon(ic, ctx.f(control::ICON_LG), ctx.t.text_tertiary));
     col = col.push(txt(ctx, title.to_string(), ts::H3, ctx.t.text));
     col = col.push(
         text(desc.to_string())
@@ -801,7 +866,6 @@ pub fn setting_row<'a, M: Clone + 'a>(
     .width(Length::Fill)
     .into()
 }
-
 
 /// 侧栏计数：超过 1000 用 k/M 缩写。
 pub fn count_label(n: usize) -> String {

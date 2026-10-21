@@ -16,6 +16,9 @@ const FONT_NOTO_SERIF_SC: &[u8] = include_bytes!("../assets/fonts/NotoSerifSC.tt
 const FONT_JETBRAINS_MONO: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono.ttf");
 
 /// 从内嵌的 Logo PNG 解码窗口图标（任务栏 / 标题栏 / Alt-Tab）。
+///
+/// 注意：这里必须用**位图**（Windows 资源图标需要 PNG/ICO 字节），
+/// 不能复用 UI 侧的 canvas 矢量绘制。
 fn window_icon() -> Option<window::icon::Icon> {
     const FOX_PNG: &[u8] = include_bytes!("../assets/fox_logo.png");
     let img = image::load_from_memory(FOX_PNG).ok()?.into_rgba8();

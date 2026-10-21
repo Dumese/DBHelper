@@ -47,6 +47,12 @@ impl App {
                 }
                 Task::none()
             }
+            Msg::WindowOpened(id) => {
+                // 窗口已创建：按当前系统版本应用边框规范
+                // （Win11 → 系统圆角，Win10 → 直角）。
+                self.window = id;
+                return decorate_window(id, self.is_dark());
+            }
             Msg::WindowMaximize => {
                 // 无边框窗口：直接调用 Win32 ShowWindow，最大化按工作区（不盖任务栏）
                 self.fullscreen = !self.fullscreen;
@@ -218,6 +224,131 @@ impl App {
             }
             Msg::ConnMenu(id) => {
                 self.conn_ui.menu_for = if self.conn_ui.menu_for == Some(id) { None } else { Some(id) };
+                Task::none()
+            }
+            // ---- 连接树右键菜单 ----
+            Msg::ConnContextRight(id) => {
+                // 坐标取全局光标位置（事件订阅里已记录）
+                let (cursor, _) = crate::probe_snapshot();
+                self.conn_menu.conn = Some(id);
+                self.conn_menu.pos = (cursor.x, cursor.y);
+                self.conn_menu.open = true;
+                Task::none()
+            }
+            Msg::ConnContextMove(y, row_h) => {
+                // 记录光标在连接列表区内的相对位置
+                self.conn_list_cursor_y = y;
+                self.conn_row_h = row_h;
+                Task::none()
+            }
+            Msg::ConnContextHit => {
+                // 按列表内相对 Y 换算成行号 → 命中连接
+                let idx = (self.conn_list_cursor_y / self.conn_row_h.max(1.0)).floor() as isize;
+                let (cursor, _) = crate::probe_snapshot();
+                // 命中的连接 = 过滤后可见列表中的第 idx 个
+                let filter = self.search.to_lowercase();
+                let visible: Vec<ConnId> = self
+                    .conns
+                    .iter()
+                    .filter(|c| filter.is_empty() || c.name.to_lowercase().contains(&filter))
+                    .map(|c| c.id)
+                    .collect();
+                let Some(&id) = visible.get(idx.max(0) as usize) else {
+                    self.conn_menu.open = false;
+                    return Task::none();
+                };
+                tracing::info!(
+                    "右键菜单命中: conn={id} idx={idx} rel_y={:.1} abs=({:.0},{:.0})",
+                    self.conn_list_cursor_y,
+                    cursor.x,
+                    cursor.y
+                );
+                self.conn_menu.conn = Some(id);
+                self.conn_menu.pos = (cursor.x, cursor.y);
+                self.conn_menu.open = true;
+                Task::none()
+            }
+            Msg::ConnContextOpen(id, x, y) => {
+                self.conn_menu.conn = Some(id);
+                self.conn_menu.pos = (x, y);
+                self.conn_menu.open = true;
+                Task::none()
+            }
+            Msg::ConnContextClose => {
+                self.conn_menu.open = false;
+                self.conn_menu.conn = None;
+                Task::none()
+            }
+            Msg::ConnEdit(id) => {
+                self.conn_menu.open = false;
+                let Some(cfg) = self.conns.iter().find(|c| c.id == id).cloned() else {
+                    return Task::none();
+                };
+                self.wizard = Some(Wizard::from_config(&cfg));
+                self.modal = Modal::Wizard;
+                Task::none()
+            }
+            Msg::ConnDuplicate(id) => {
+                self.conn_menu.open = false;
+                let Some(cfg) = self.conns.iter().find(|c| c.id == id).cloned() else {
+                    return Task::none();
+                };
+                let Some(core) = self.core.clone() else { return Task::none() };
+                // 副本用新的 id（id = 当前最大 id + 1），名称加「副本」后缀。
+                let new_id = self.conns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+                let mut dup = cfg.clone();
+                dup.id = new_id;
+                dup.name = format!("{} 副本", cfg.name);
+                dup.created_at = dbhelper_utils::textfmt::now_secs();
+                Task::perform(
+                    async move {
+                        core.store
+                            .save_connection(&dup)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        Ok::<_, String>(dup)
+                    },
+                    |r| match r {
+                        Ok(c) => Msg::ConnDuplicated(c),
+                        Err(e) => {
+                            tracing::warn!("复制连接失败: {e}");
+                            Msg::ConnDuplicateFailed(e.to_string())
+                        }
+                    },
+                )
+            }
+            Msg::ConnRefresh(id) => {
+                self.conn_menu.open = false;
+                // 重新加载该连接的对象树（库/表/视图）
+                self.load_tree(id)
+            }
+            Msg::ConnNewQuery(id) => {
+                self.conn_menu.open = false;
+                self.new_query_tab_for(id)
+            }
+            Msg::ConnCli(id) => {
+                self.conn_menu.open = false;
+                // 「命令行界面」：为该连接打开一个查询页并预置该类型的诊断命令，
+                // 供用户在 SQL 控制台直接执行。
+                let Some(cfg) = self.conns.iter().find(|c| c.id == id).cloned() else {
+                    return Task::none();
+                };
+                let prelude = match cfg.kind {
+                    dbhelper_models::DbKind::Redis => "INFO SERVER\r\nCLIENT LIST\r\n",
+                    dbhelper_models::DbKind::Mongodb => "db.runCommand({ ping: 1 })\r\n",
+                    dbhelper_models::DbKind::Elasticsearch => "_cat/indices?v\r\n",
+                    _ => "SELECT 1;\r\n",
+                };
+                self.open_query_with(id, prelude.to_string())
+            }
+            Msg::ConnDuplicated(cfg) => {
+                self.conns.push(cfg.clone());
+                self.conn_ui.recent.insert(0, cfg.clone());
+                self.toast(format!("已复制连接「{}」", cfg.name), crate::theme::Tone::Success);
+                Task::none()
+            }
+            Msg::ConnDuplicateFailed(err) => {
+                self.toast(format!("复制连接失败：{err}"), crate::theme::Tone::Error);
                 Task::none()
             }
             Msg::DeleteConnection(id) => {
@@ -972,7 +1103,10 @@ impl App {
             }
             Msg::SetTheme(mode) => {
                 self.settings.theme = mode;
-                self.persist_settings()
+                let dark = self.is_dark();
+                self.persist_settings();
+                // 主题切换后重设窗口边框色（Win11 圆角边框跟随明暗）。
+                return decorate_window(self.window, dark);
             }
             Msg::SetLanguage(lang) => {
                 self.settings.language = lang;
@@ -1084,6 +1218,43 @@ impl App {
                 self.modal = Modal::None;
                 self.wizard = None;
                 self.confirm = None;
+                Task::none()
+            }
+            Msg::ShowAbout => {
+                self.modal = Modal::About;
+                Task::none()
+            }
+            Msg::ShowShortcuts => {
+                self.modal = Modal::Shortcuts;
+                Task::none()
+            }
+            Msg::ShowHistory => {
+                self.modal = Modal::History;
+                self.history_ui.loading = true;
+                self.history_ui.error = None;
+                // 从本地 store 异步加载历史（core 未就绪时给出提示而非空白）
+                let Some(core) = self.core.clone() else {
+                    self.history_ui.loading = false;
+                    self.history_ui.error = Some("核心模块尚未就绪".into());
+                    return Task::none();
+                };
+                Task::perform(
+                    async move { core.store.history(200).await },
+                    |r| match r {
+                        Ok(v) => Msg::HistoryLoaded(Ok(v)),
+                        Err(e) => Msg::HistoryLoaded(Err(e.to_string())),
+                    },
+                )
+            }
+            Msg::HistoryLoaded(result) => {
+                self.history_ui.loading = false;
+                match result {
+                    Ok(v) => {
+                        self.history_ui.entries = v;
+                        self.history_ui.error = None;
+                    }
+                    Err(e) => self.history_ui.error = Some(e),
+                }
                 Task::none()
             }
             Msg::ConfirmRun => self.confirm_run(),
@@ -1714,8 +1885,17 @@ fn build_edit_fields(tab: &DataTab, row_index: usize) -> Vec<EditField> {
         .collect()
 }
 
-fn default_es_dsl(index: &str) -> String {
-    format!(
+/// 按当前系统版本应用窗口边框规范：Win11 → 系统圆角，Win10 → 直角。
+///
+/// 必须在窗口创建后调用（`iced::window::run` 会等到窗口可用）。
+fn decorate_window(id: iced::window::Id, dark: bool) -> Task<Msg> {
+    iced::window::run(id, move |window| {
+        crate::platform::decorate_window(window, dark);
+    })
+    .map(|_| Msg::Noop)
+}
+
+fn default_es_dsl(index: &str) -> String {    format!(
         "{{\n  \"query\": {{ \"bool\": {{ \"must\": [\n    {{ \"match\": {{ \"message\": \"timeout\" }} }},\n    {{ \"range\": {{ \"@timestamp\": {{ \"gte\": \"now-15m\" }} }} }}\n  ] }} }},\n  \"size\": 50,\n  \"sort\": [ {{ \"@timestamp\": {{ \"order\": \"desc\" }} }} ]\n}}"
     )
     .replace("{index}", index)

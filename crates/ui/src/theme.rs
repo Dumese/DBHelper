@@ -170,6 +170,49 @@ pub mod size {
     pub const TINY: f32 = 11.0;
 }
 
+// ---- 控件尺寸（对齐 Notion 设计规范）----
+//
+// Notion 的控件规格：
+// - 图标：标准 16px（行内图标），辅助 12px
+// - 图标按钮：28×28 点击区（留白 6px），三档 small 24 / medium 28 / large 32
+// - 文字按钮：medium 高 28px、large 高 32px，水平内边距 12px
+// - 列表行高：28px
+//
+// 之前图标普遍用 10~13px、按钮点击区不足 24px，在 100% 缩放下明显偏小，
+// 与 Notion 的一致性不符，这里统一下沉为令牌。
+pub mod control {
+    /// 行内图标标准尺寸（Notion：16px）。
+    pub const ICON: f32 = 16.0;
+    /// 辅助图标（小号标注、chip 关闭等）。
+    pub const ICON_SM: f32 = 12.0;
+    /// 空状态插图。
+    pub const ICON_LG: f32 = 28.0;
+
+    /// 图标按钮点击区边长（Notion medium：28px）。
+    pub const ICON_BTN: f32 = 28.0;
+    /// 图标按钮小号（Notion small：24px）。
+    pub const ICON_BTN_SM: f32 = 24.0;
+    /// 图标按钮大号（Notion large：32px）。
+    pub const ICON_BTN_LG: f32 = 32.0;
+
+    /// 文字按钮高度（Notion medium：28px）。
+    pub const BTN_H: f32 = 28.0;
+    /// 文字按钮大号高度（Notion large：32px）。
+    pub const BTN_H_LG: f32 = 32.0;
+
+    /// 列表行高（Notion：28px）。
+    pub const ROW_H: f32 = 28.0;
+    /// 树节点行高（略大于列表行，容纳双行文字）。
+    pub const TREE_ROW_H: f32 = 30.0;
+
+    /// 标题栏高度（Windows 11 规范约 32-40px）。
+    pub const TITLEBAR_H: f32 = 38.0;
+    /// 标题栏窗口按钮宽度（Windows 11 规范：46×32）。
+    pub const WIN_BTN_W: f32 = 46.0;
+    /// 标题栏窗口按钮高度。
+    pub const WIN_BTN_H: f32 = 32.0;
+}
+
 /// 字体族映射：把设置里保存的字体名映射为字体库中可解析的真实族名。
 ///
 /// 「Noto Sans SC / Noto Serif SC / JetBrains Mono」三套字体由 `crates/app/assets/fonts/`

@@ -3,11 +3,11 @@
 use crate::icons::Icon;
 use crate::kit::{self, Ctx};
 use crate::state::{Confirm, Modal, Wizard};
-use crate::theme::{radius, size as ts, space, Tone};
+use crate::theme::{control, radius, size as ts, space, Tone};
 use crate::view::kind_icon;
 use crate::{App, Msg};
 use dbhelper_models::{DbKind, SslMode};
-use iced::widget::{column, container, row, scrollable, Space};
+use iced::widget::{column, container, row, scrollable, stack, Space};
 use iced::{Alignment, Border, Color, Element, Length, Padding, Theme};
 
 pub fn modal<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
@@ -17,30 +17,107 @@ pub fn modal<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         Modal::Export => export_wizard(app, ctx),
         Modal::Import => crate::view::features::import_panel(app, ctx),
         Modal::Confirm(c) => confirm(ctx, c),
+        Modal::About => about(app, ctx),
+        Modal::Shortcuts => shortcuts(ctx),
+        Modal::History => history(app, ctx),
         _ => Space::new().width(0).height(0).into(),
     };
 
-    container(
-        container(content)
-            .width(Length::Fixed(if matches!(app.modal, Modal::Export) { 560.0 } else { 620.0 }))
-            .style(move |_: &Theme| container::Style {
-                background: Some(t.bg.into()),
-                border: Border { color: t.hairline, width: 1.0, radius: radius::LG.into() },
-                // 注：tiny-skia 后端对大半径阴影绘制异常（会盖住内容），
-                // 这里改用描边 + 遮罩表达层级。
-                shadow: iced::Shadow::default(),
-                ..Default::default()
-            }),
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .center_x(Length::Fill)
-    .center_y(Length::Fill)
-    .style(move |_: &Theme| container::Style {
-        background: Some(t.overlay.into()),
-        ..Default::default()
-    })
-    .into()
+    // 遮罩 + 居中弹窗。
+    //
+    // 用 `stack` 而不是 `container(center_x/center_y)`：后者在 Fill 容器里
+    // 会把 Shrink 内容的对齐交给 flex 解析，导致内容被拉伸到边角
+    // （表现为标题跑到弹窗右下角）。stack 叠放更可控。
+    let panel = container(content)
+        .width(Length::Fixed(if matches!(app.modal, Modal::Export) { 560.0 } else { 620.0 }))
+        .style(move |_: &Theme| container::Style {
+            background: Some(t.bg.into()),
+            border: Border { color: t.hairline, width: 1.0, radius: radius::LG.into() },
+            // 注：tiny-skia 后端对大半径阴影绘制异常（会盖住内容），
+            // 这里改用描边 + 遮罩表达层级。
+            shadow: iced::Shadow::default(),
+            ..Default::default()
+        });
+
+    // 遮罩层：Fill 尺寸 + 半透明底 + 居中放置弹窗面板。
+    //
+    // 关键：面板本身是 Shrink 尺寸（宽度固定、高度自适应），
+    // 外层用 `center_x/center_y` 把它推到正中。
+    container(panel)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .style(move |_: &Theme| container::Style {
+            background: Some(t.overlay.into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// 弹窗统一头部：标题 + 副标题 + 右上角关闭按钮。
+///
+/// 此前只有「新建连接」「导出向导」两个弹窗有关闭按钮，
+/// 确认框、导入面板完全没有 X，用户无法用鼠标关闭；这里统一为所有弹窗
+/// 提供同一套头部，保证右上角永远有可点的关闭按钮。
+fn modal_header<'a>(
+    ctx: Ctx,
+    title: impl Into<String>,
+    subtitle: Option<String>,
+    close_msg: Msg,
+) -> Element<'a, Msg> {
+    let t = ctx.t;
+    // 头部结构：左侧标题（纵向：主标题 + 副标题），右侧关闭按钮。
+    // 用 container 明确指定高度，避免 Shrink/Fill 混排导致布局被拉开。
+    let mut titles = column![].spacing(2);
+    titles = titles.push(kit::txt_bold(ctx, title, ts::H2, t.text));
+    if let Some(sub) = subtitle {
+        titles = titles.push(kit::txt(ctx, sub, ts::SMALL, t.text_secondary));
+    }
+
+    let head = row![
+        container(titles)
+            .height(Length::Shrink)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+        // 关闭按钮：28×28 点击区（Notion 规范），16px 图标
+        kit::icon_button(ctx, Icon::Close, control::ICON, t.text_secondary, close_msg),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(8);
+
+    container(head)
+        .padding(Padding { top: 16.0, right: 16.0, bottom: 12.0, left: 20.0 })
+        .width(Length::Fill)
+        .height(Length::Shrink)
+        .into()
+}
+
+/// 弹窗底部按钮条（取消 / 确认）。
+fn modal_footer<'a, M: Clone + 'a>(
+    ctx: Ctx,
+    left: Option<Element<'a, M>>,
+    right: Vec<Element<'a, M>>,
+) -> Element<'a, M> {
+    let t = ctx.t;
+    let mut r = row![].spacing(8).align_y(Alignment::Center);
+    for b in right {
+        r = r.push(b);
+    }
+    let mut row = match left {
+        Some(l) => row![l, kit::hspace(), r],
+        None => row![kit::hspace(), r],
+    };
+    row = row.align_y(Alignment::Center);
+
+    container(row)
+        .padding(Padding { top: 12.0, right: 20.0, bottom: 16.0, left: 20.0 })
+        .width(Length::Fill)
+        .style(move |_: &Theme| container::Style {
+            border: Border { color: t.hairline, width: 1.0, radius: 0.0.into() },
+            ..Default::default()
+        })
+        .into()
 }
 
 // ---------------------------------------------------------------------------
@@ -51,24 +128,12 @@ fn wizard<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
     let Some(w) = &app.wizard else { return Space::new().width(0).height(0).into() };
 
-    let header = container(
-        column![
-            row![
-                kit::txt_bold(ctx, "新建连接", ts::H2, t.text),
-                kit::hspace(),
-                kit::icon_button(ctx, Icon::Close, 13.0, t.text_secondary, Msg::WizardClose),
-            ]
-            .align_y(Alignment::Center),
-            kit::txt(
-                ctx,
-                format!("第 {} 步 / 共 3 步 · {}", w.step + 1, step_name(w.step)),
-                ts::MICRO,
-                t.text_tertiary
-            ),
-        ]
-        .spacing(2),
-    )
-    .padding(Padding { top: 14.0, right: 14.0, bottom: 10.0, left: 16.0 });
+    let header = modal_header(
+        ctx,
+        "新建连接",
+        Some(format!("第 {} 步 / 共 3 步 · {}", w.step + 1, step_name(w.step))),
+        Msg::WizardClose,
+    );
 
     let body: Element<Msg> = match w.step {
         0 => step_kind(w, ctx),
@@ -76,30 +141,22 @@ fn wizard<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         _ => step_test(w, ctx),
     };
 
-    let footer = container(
-        row![
-            if w.step > 0 {
-                kit::ghost(ctx, "上一步", Msg::WizardStep(-1))
-            } else {
-                kit::gap(1.0, 1.0)
-            },
-            kit::hspace(),
+    let footer = modal_footer(
+        ctx,
+        Some(if w.step > 0 {
+            kit::ghost(ctx, "上一步", Msg::WizardStep(-1))
+        } else {
+            kit::gap(1.0, 1.0)
+        }),
+        vec![
             kit::secondary(ctx, "取消", Msg::WizardClose),
             if w.step < 2 {
                 kit::primary(ctx, "下一步", Msg::WizardStep(1))
             } else {
                 kit::primary(ctx, if w.saving { "保存中…" } else { "保存连接" }, Msg::WizardSave)
             },
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .padding(Padding { top: 10.0, right: 14.0, bottom: 12.0, left: 16.0 }),
-    )
-    .width(Length::Fill)
-    .style(move |_: &Theme| container::Style {
-        border: Border { color: t.hairline, width: 1.0, radius: 0.0.into() },
-        ..Default::default()
-    });
+        ],
+    );
 
     // 校验错误横幅：所有步骤统一显示（此前只在表单步渲染，第 0 步报错无任何反馈）
     let error_banner: Element<Msg> = match &w.error {
@@ -115,6 +172,13 @@ fn wizard<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         None => Space::new().width(0).height(0).into(),
     };
 
+    // header 固定顶部、body 自然高度、footer 固定底部。
+    //
+    // 关键：body **不能**放进 `height(Fill)` 的容器——body 本身是 Shrink 高度，
+    // 在 Fill 容器里会被垂直居中（表现为标题/内容跑到弹窗中间、卡片沉底）。
+    // column 默认就是顶部对齐排列。
+    // 注意：不要给 column 设 height(Fill) —— Shrink 子元素在 Fill 列里会被拉开分布，
+    // 表现为标题跑到弹窗中间、内容沉到底部。
     column![header, error_banner, body, footer].into()
 }
 
@@ -288,20 +352,20 @@ fn step_form<'a>(w: &'a Wizard, ctx: Ctx) -> Element<'a, Msg> {
     );
 
     let _ = SslMode::ALL;
-    scrollable(fields).height(Length::Fixed(320.0)).into()
+    scrollable(fields).height(Length::Fill).into()
 }
 
 fn step_test<'a>(w: &'a Wizard, ctx: Ctx) -> Element<'a, Msg> {
     let t = ctx.t;
     let result: Element<Msg> = match &w.test_result {
         Some(Ok(msg)) => row![
-            kit::icon(Icon::Check, 13.0, t.success),
+            kit::icon(Icon::Check, control::ICON_SM, t.success),
             kit::txt(ctx, msg.clone(), ts::SMALL, t.success),
         ]
         .spacing(6)
         .into(),
         Some(Err(err)) => row![
-            kit::icon(Icon::Close, 13.0, t.error),
+            kit::icon(Icon::Close, control::ICON_SM, t.error),
             kit::txt(ctx, err.clone(), ts::SMALL, t.error),
         ]
         .spacing(6)
@@ -394,6 +458,7 @@ fn export_wizard<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 
     let content: Element<Msg> = match st.export_step {
         0 => column![
+            stepper,
             kit::txt(ctx, "选择要导出的内容", ts::SMALL, t.text_secondary),
             Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(8.0)),
             kit::checkbox(ctx, "连接配置（全部已保存的连接与凭据）", st.export_items[0], |v| Msg::ExportToggle(0, v)),
@@ -404,6 +469,7 @@ fn export_wizard<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         .spacing(8)
         .into(),
         1 => column![
+            stepper,
             kit::txt(ctx, "导出格式", ts::SMALL, t.text_secondary),
             Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(8.0)),
             kit::segmented(
@@ -415,6 +481,7 @@ fn export_wizard<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         .spacing(6)
         .into(),
         _ => column![
+            stepper,
             kit::txt(ctx, "准备就绪", ts::H3, t.text),
             kit::txt(
                 ctx,
@@ -432,40 +499,28 @@ fn export_wizard<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     };
 
     column![
-        container(
-            column![
-                row![
-                    kit::txt_bold(ctx, "导出向导", ts::H1, t.text),
-                    kit::hspace(),
-                    kit::icon_button(ctx, Icon::Close, 13.0, t.text_secondary, Msg::DismissModal),
-                ]
-                .align_y(Alignment::Center),
-                kit::txt(ctx, "将连接配置、查询历史与偏好导出为文件", ts::SMALL, t.text_secondary),
-                Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(10.0)),
-                stepper,
-            ]
-            .spacing(4),
-        )
-        .padding(Padding { top: 16.0, right: 18.0, bottom: 12.0, left: 18.0 }),
+        modal_header(
+            ctx,
+            "导出向导",
+            Some("将连接配置、查询历史与偏好导出为文件".into()),
+            Msg::DismissModal,
+        ),
         kit::hline(ctx),
-        container(content).padding(Padding { top: 14.0, right: 18.0, bottom: 20.0, left: 18.0 }),
         container(
-            row![
-                kit::ghost(ctx, "取消", Msg::DismissModal),
-                kit::hspace(),
-                if st.export_step < 2 {
-                    kit::primary(ctx, "下一步", Msg::ExportStep(1))
-                } else {
-                    kit::primary(ctx, "导出", Msg::ExportRun)
-                },
-            ]
-            .spacing(8)
-            .padding(Padding { top: 10.0, right: 18.0, bottom: 12.0, left: 18.0 }),
+            column![content]
+                .spacing(0)
+                .padding(Padding { top: 16.0, right: 20.0, bottom: 20.0, left: 20.0 }),
         )
-        .style(move |_: &Theme| container::Style {
-            border: Border { color: t.hairline, width: 1.0, radius: 0.0.into() },
-            ..Default::default()
-        }),
+        .width(Length::Fill),
+        modal_footer(
+            ctx,
+            Some(kit::ghost(ctx, "取消", Msg::DismissModal)),
+            vec![if st.export_step < 2 {
+                kit::primary(ctx, "下一步", Msg::ExportStep(1))
+            } else {
+                kit::primary(ctx, "导出", Msg::ExportRun)
+            }],
+        ),
     ]
     .into()
 }
@@ -477,15 +532,19 @@ fn export_wizard<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 fn confirm<'a>(ctx: Ctx, c: &'a Confirm) -> Element<'a, Msg> {
     let t = ctx.t;
     column![
+        // 确认框此前没有关闭按钮，只能靠「取消」键关闭；现在右上角补 X。
         container(
             row![
-                kit::icon(Icon::Shield, 16.0, if c.danger { t.warning } else { t.accent }),
+                kit::icon(Icon::Shield, control::ICON, if c.danger { t.warning } else { t.accent }),
                 kit::txt_bold(ctx, c.title.clone(), ts::H2, t.text),
+                kit::hspace(),
+                kit::icon_button(ctx, Icon::Close, control::ICON, t.text_secondary, Msg::CancelConfirm),
             ]
-            .spacing(8)
+            .spacing(10)
             .align_y(Alignment::Center)
-            .padding(Padding { top: 16.0, right: 18.0, bottom: 8.0, left: 18.0 }),
-        ),
+            .padding(Padding { top: 16.0, right: 16.0, bottom: 8.0, left: 20.0 }),
+        )
+        .width(Length::Fill),
         container(
             column![
                 kit::txt(ctx, c.message.clone(), ts::BODY, t.text),
@@ -495,25 +554,155 @@ fn confirm<'a>(ctx: Ctx, c: &'a Confirm) -> Element<'a, Msg> {
                 },
             ]
             .spacing(8)
-            .padding(Padding { top: 0.0, right: 18.0, bottom: 14.0, left: 18.0 }),
-        ),
-        container(
-            row![
-                kit::hspace(),
+            .padding(Padding { top: 0.0, right: 20.0, bottom: 16.0, left: 20.0 }),
+        )
+        .width(Length::Fill),
+        modal_footer(
+            ctx,
+            None,
+            vec![
                 kit::secondary(ctx, "取消", Msg::CancelConfirm),
                 if c.danger {
                     kit::button_kind(ctx, "确认执行", kit::BtnKind::Primary, Msg::ConfirmRun)
                 } else {
                     kit::primary(ctx, "确认", Msg::ConfirmRun)
                 },
+            ],
+        ),
+    ]
+    .into()
+}
+
+// ---------------------------------------------------------------------------
+// 关于 / 快捷键 / 查询历史
+// ---------------------------------------------------------------------------
+
+/// 「关于」弹窗。
+fn about<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
+    let t = ctx.t;
+    let _ = app;
+    let mut rows = column![].spacing(10);
+    for (k, v) in [
+        ("产品", "DBHelper"),
+        ("版本", "v2.4.1"),
+        ("定位", "多数据库管理工具（对标 Navicat / DBeaver）"),
+        ("支持", "MySQL / PostgreSQL / SQLite / SQL Server / Oracle / Redis / MongoDB / Elasticsearch"),
+        ("凭据", "Vault 加密存储（AES-256-GCM + Windows Credential Manager）"),
+    ] {
+        rows = rows.push(
+            row![
+                kit::txt(ctx, k.to_string(), ts::SMALL, t.text_secondary),
+                kit::txt(ctx, v.to_string(), ts::SMALL, t.text),
             ]
-            .spacing(8)
-            .padding(Padding { top: 10.0, right: 18.0, bottom: 14.0, left: 18.0 }),
+            .spacing(16)
+            .align_y(Alignment::Start),
+        );
+    }
+
+    column![
+        modal_header(ctx, "关于 DBHelper", Some("多数据库管理工具".into()), Msg::DismissModal),
+        container(
+            column![
+                row![
+                    crate::icons::fox_logo(56.0),
+                    column![
+                        kit::txt_bold(ctx, "DBHelper", ts::H1, t.text),
+                        kit::txt(ctx, "v2.4.1", ts::SMALL, t.text_secondary),
+                    ]
+                    .spacing(2),
+                ]
+                .spacing(16)
+                .align_y(Alignment::Center),
+                Space::new().width(Length::Fixed(0.0)).height(Length::Fixed(8.0)),
+                rows,
+            ]
+            .spacing(0)
+            .padding(Padding { top: 16.0, right: 20.0, bottom: 20.0, left: 20.0 }),
         )
-        .style(move |_: &Theme| container::Style {
-            border: Border { color: t.hairline, width: 1.0, radius: 0.0.into() },
-            ..Default::default()
-        }),
+        .width(Length::Fill),
+        modal_footer(ctx, None, vec![kit::primary(ctx, "关闭", Msg::DismissModal)]),
+    ]
+    .into()
+}
+
+/// 「快捷键」弹窗。
+fn shortcuts<'a>(ctx: Ctx) -> Element<'a, Msg> {
+    let t = ctx.t;
+    let items: &[(&str, &str)] = &[
+        ("F5", "执行当前查询"),
+        ("Ctrl+Space", "SQL 补全"),
+        ("Ctrl+F", "搜索"),
+        ("Ctrl+S", "保存"),
+        ("Ctrl+Z / Ctrl+Y", "撤销 / 重做"),
+        ("Ctrl+C / Ctrl+V / Ctrl+X", "复制 / 粘贴 / 剪切"),
+        ("F11", "最大化 / 还原"),
+        ("Esc", "关闭弹窗 / 取消补全"),
+    ];
+    let mut rows = column![].spacing(0);
+    for (i, (k, v)) in items.iter().enumerate() {
+        rows = rows.push(
+            container(
+                row![
+                    kit::mono(ctx, (*k).to_string(), ts::MICRO, t.text),
+                    kit::txt(ctx, (*v).to_string(), ts::SMALL, t.text_secondary),
+                    kit::hspace(),
+                ]
+                .spacing(16)
+                .align_y(Alignment::Center),
+            )
+            .padding(Padding { top: 8.0, right: 0.0, bottom: 8.0, left: 0.0 })
+            .width(Length::Fill)
+            .style(move |_: &Theme| container::Style {
+                background: if i % 2 == 0 { Some(t.soft.into()) } else { None },
+                ..Default::default()
+            }),
+        );
+    }
+
+    column![
+        modal_header(ctx, "快捷键", Some("编辑器与窗口".into()), Msg::DismissModal),
+        container(rows).padding(Padding { top: 12.0, right: 20.0, bottom: 16.0, left: 20.0 }),
+        modal_footer(ctx, None, vec![kit::primary(ctx, "关闭", Msg::DismissModal)]),
+    ]
+    .into()
+}
+
+/// 「查询历史」弹窗。
+fn history<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
+    let t = ctx.t;
+    let mut rows = column![].spacing(0);
+    if app.history_ui.loading {
+        rows = rows.push(kit::txt(ctx, "正在加载历史记录…", ts::SMALL, t.text_secondary));
+    } else if let Some(err) = &app.history_ui.error {
+        rows = rows.push(kit::txt(ctx, err.clone(), ts::SMALL, t.error));
+    } else if app.history_ui.entries.is_empty() {
+        rows = rows.push(kit::txt(ctx, "暂无查询历史记录。", ts::SMALL, t.text_secondary));
+    } else {
+        for h in app.history_ui.entries.iter().take(200) {
+            let when = dbhelper_utils::textfmt::ts(h.executed_at);
+            rows = rows.push(
+                container(
+                    row![
+                        kit::mono(ctx, h.sql.chars().take(120).collect::<String>(), ts::MICRO, t.text),
+                        kit::hspace(),
+                        kit::txt(ctx, format!("{when} · {} 行", h.rows), ts::TINY, t.text_tertiary),
+                    ]
+                    .spacing(10)
+                    .align_y(Alignment::Center),
+                )
+                .padding(Padding { top: 6.0, right: 0.0, bottom: 6.0, left: 0.0 })
+                .width(Length::Fill),
+            );
+        }
+    }
+
+    column![
+        modal_header(ctx, "查询历史", Some("最近执行的 SQL".into()), Msg::DismissModal),
+        container(
+            scrollable(rows).height(Length::Fixed(320.0)),
+        )
+        .padding(Padding { top: 12.0, right: 20.0, bottom: 16.0, left: 20.0 }),
+        modal_footer(ctx, None, vec![kit::primary(ctx, "关闭", Msg::DismissModal)]),
     ]
     .into()
 }

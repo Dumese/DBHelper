@@ -540,6 +540,28 @@ pub struct ConnUi {
     pub menu_for: Option<ConnId>,
 }
 
+/// 连接树右键菜单的打开状态。
+///
+/// iced 0.14 没有内置 `context_menu` 组件，这里自绘浮层：
+/// 记录「当前打开菜单的连接」与「鼠标位置」，由视图层在对应坐标处渲染菜单面板。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ConnMenuState {
+    /// 菜单所属连接。
+    pub conn: Option<ConnId>,
+    /// 菜单左上角在窗口内的坐标（像素）。
+    pub pos: (f32, f32),
+    /// 是否打开。
+    pub open: bool,
+}
+
+/// 「查询历史」弹窗的数据（由 core 的 store 异步加载）。
+#[derive(Debug, Clone, Default)]
+pub struct HistoryUi {
+    pub entries: Vec<dbhelper_models::HistoryEntry>,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // 向导
 // ---------------------------------------------------------------------------
@@ -607,6 +629,30 @@ impl Wizard {
 
     pub fn username_hint(&self) -> String {
         self.user.clone()
+    }
+
+    /// 由已有连接配置构造向导（用于「编辑连接」）。
+    ///
+    /// 直接进入第 1 步（填写连接信息），并带上 `edit_id`，
+    /// 保存时走「更新」而非「新建」分支。
+    pub fn from_config(cfg: &ConnectionConfig) -> Self {
+        let mut w = Self::new(cfg.kind);
+        w.step = 1;
+        w.name = cfg.name.clone();
+        w.host = cfg.host.clone();
+        w.port = cfg.port.to_string();
+        w.database = cfg.database.clone();
+        w.user = cfg.username.clone();
+        w.group = cfg.group.clone();
+        w.readonly = cfg.readonly;
+        w.ssl = SslMode::ALL
+            .iter()
+            .position(|s| *s == cfg.ssl)
+            .unwrap_or(if cfg.kind.is_file_based() { 0 } else { 1 });
+        w.ssh = cfg.ssh.enabled;
+        w.ssh_host = cfg.ssh.host.clone();
+        w.edit_id = Some(cfg.id);
+        w
     }
 
     pub fn validate(&self) -> Option<String> {

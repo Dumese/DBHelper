@@ -1,5 +1,6 @@
 //! 界面装配：外壳 + 当前页 + 弹层。
 
+pub mod conn_menu;
 pub mod data;
 pub mod dialogs;
 pub mod er;
@@ -91,15 +92,29 @@ fn view_inner(app: &App) -> Element<Msg> {
         shell::statusbar(app, ctx),
     ];
 
+    // base 层必须严格等于窗口尺寸：stack 用 base 的尺寸给所有层做布局基准，
+    // 若 base 超尺寸，弹窗/浮层就会被挤到窗口内的相对位置（表现为弹窗嵌在主区里）。
     let base = container(layout)
         .width(Length::Fill)
         .height(Length::Fill)
+        .clip(true)
         .style(move |_: &Theme| container::Style {
             background: Some(t.bg.into()),
             ..Default::default()
         });
 
-    let mut layers = stack![base];
+    // stack 必须显式给 Fill 尺寸：否则各层按自身内容尺寸摆放，
+    // 弹窗层会只占内容大小并被顶到角落（标题跑到弹窗右下角）。
+    // stack 各层必须严格等于窗口尺寸：iced 的 stack 用 base 层的
+    // `size()` 决定所有层的布局基准，base 若是 Shrink 就会把上层
+    // （弹窗 / 右键菜单）挤到窗口内的相对位置（表现为弹窗嵌在主区中央）。
+    let mut layers = stack![base]
+        .width(Length::Fill)
+        .height(Length::Fill);
+    // 连接树右键菜单：浮层定位到鼠标点击处，点击别处关闭。
+    if app.conn_menu.open {
+        layers = layers.push(conn_menu::overlay(app, ctx));
+    }
     if !matches!(app.modal, Modal::None) {
         layers = layers.push(dialogs::modal(app, ctx));
     }

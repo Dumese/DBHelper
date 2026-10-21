@@ -47,10 +47,16 @@ pub enum Icon {
     User,
 }
 
-/// 产品 Logo（狐狸头）：使用设计资源位图，自带透明通道，任意尺寸清晰。
+/// 产品 Logo（狐狸头）：直接使用设计提供的矢量 SVG。
+///
+/// 用 SVG 而非位图的原因：
+/// 1. 任意尺寸都锐利（侧栏 22px 与关于弹窗 96px 同一份资源）；
+/// 2. 不经过位图纹理上传路径，避免通道/预乘 alpha 处理引入的偏色。
+///
+/// 资源：`crates/ui/assets/fox_logo.svg`（设计原始文件，未做任何修改）。
 pub fn fox_logo<'a, M: 'a>(size: f32) -> Element<'a, M> {
-    const FOX_PNG: &[u8] = include_bytes!("../assets/fox_logo.png");
-    iced::widget::image(iced::widget::image::Handle::from_bytes(FOX_PNG.to_vec()))
+    const FOX_SVG: &[u8] = include_bytes!("../assets/fox_logo.svg");
+    iced::widget::svg(iced::widget::svg::Handle::from_memory(FOX_SVG))
         .width(Length::Fixed(size))
         .height(Length::Fixed(size))
         .into()
