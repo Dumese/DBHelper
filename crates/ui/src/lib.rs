@@ -229,6 +229,11 @@ pub enum Msg {
     DataSort(String),
     DataAddFilter,
     DataReload,
+    DataViewMode(usize),
+    DataMaskToggle,
+    DataBatchField(String),
+    DataBatchValue(String),
+    DataBatchApply,
 
     // ER
     ErLoaded(ConnId, Result<Vec<TableDef>, String>),

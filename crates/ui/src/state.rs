@@ -182,6 +182,13 @@ pub struct DataTab {
     pub loading: bool,
     pub dirty: usize,
     pub viewport: f32,
+    /// 视图模式：0 网格 / 1 表单 / 2 树 / 3 JSON。
+    pub view_mode: usize,
+    /// 数据脱敏开关（手机号/邮箱/身份证等敏感列打码）。
+    pub mask: bool,
+    /// 批量编辑：统一设置某列的值。
+    pub batch_field: String,
+    pub batch_value: String,
 }
 
 impl DataTab {

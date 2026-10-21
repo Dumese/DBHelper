@@ -606,6 +606,60 @@ impl App {
                 Task::none()
             }
 
+            // -----------------------------------------------------------------
+            // 数据编辑增强：视图切换 / 脱敏 / 批量编辑
+            // -----------------------------------------------------------------
+            Msg::DataViewMode(mode) => {
+                if let Some(tab) = self.current_data_mut() {
+                    tab.view_mode = mode.min(3);
+                }
+                Task::none()
+            }
+            Msg::DataMaskToggle => {
+                if let Some(tab) = self.current_data_mut() {
+                    tab.mask = !tab.mask;
+                }
+                Task::none()
+            }
+            Msg::DataBatchField(f) => {
+                if let Some(tab) = self.current_data_mut() {
+                    tab.batch_field = f;
+                }
+                Task::none()
+            }
+            Msg::DataBatchValue(v) => {
+                if let Some(tab) = self.current_data_mut() {
+                    tab.batch_value = v;
+                }
+                Task::none()
+            }
+            Msg::DataBatchApply => {
+                let Some(tab) = self.current_data_mut() else { return Task::none() };
+                if tab.batch_field.trim().is_empty() {
+                    self.toast("请先选择要批量设置的列", Tone::Warning);
+                    return Task::none();
+                }
+                let col_name = tab.batch_field.trim().to_string();
+                let value = tab.batch_value.clone();
+                let Some(col_idx) = tab.columns.iter().position(|c| c.name == col_name) else {
+                    self.toast(format!("列不存在：{col_name}"), Tone::Warning);
+                    return Task::none();
+                };
+                let n = tab.rows.len();
+                for row in &mut tab.rows {
+                    if let Some(cell) = row.get_mut(col_idx) {
+                        *cell = if value.is_empty() {
+                            Value::Null
+                        } else {
+                            Value::Text(value.clone())
+                        };
+                    }
+                }
+                tab.dirty = tab.dirty.saturating_add(n);
+                self.toast(format!("已批量设置 {n} 行的 {col_name}，记得提交"), Tone::Success);
+                Task::none()
+            }
+
             Msg::Noop => Task::none(),
             _ => Task::none(),
         }
