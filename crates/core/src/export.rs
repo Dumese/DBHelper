@@ -229,6 +229,10 @@ pub async fn read_import_file(path: String) -> Result<(Vec<String>, Vec<Vec<Valu
         let lower = path.to_lowercase();
         if lower.ends_with(".xlsx") || lower.ends_with(".xls") {
             read_xlsx(&path)
+        } else if lower.ends_with(".json") {
+            read_json(&path)
+        } else if lower.ends_with(".tsv") {
+            read_delimited(&path, b'\t')
         } else {
             read_csv(&path)
         }
@@ -237,10 +241,100 @@ pub async fn read_import_file(path: String) -> Result<(Vec<String>, Vec<Vec<Valu
     .map_err(|e| e.to_string())?
 }
 
+/// 读取 JSON 结果集文件。
+///
+/// 支持两种形态：
+/// 1. 对象数组 `[{"col": v, ...}, ...]`（本项目导出的格式）
+/// 2. 嵌套数组 `[[v, v], ...]`（第一行视为表头）
+fn read_json(path: &str) -> Result<(Vec<String>, Vec<Vec<Value>>), String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let parsed: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    match parsed {
+        serde_json::Value::Array(items) if items.is_empty() => Ok((Vec::new(), Vec::new())),
+        serde_json::Value::Array(items) => {
+            // 形态 1：对象数组
+            if items.iter().all(|v| v.is_object()) {
+                // 列顺序：按首个对象的键序，缺失的列补到末尾
+                let mut columns: Vec<String> = Vec::new();
+                for item in &items {
+                    if let Some(obj) = item.as_object() {
+                        for k in obj.keys() {
+                            if !columns.contains(k) {
+                                columns.push(k.clone());
+                            }
+                        }
+                    }
+                }
+                let mut rows = Vec::with_capacity(items.len());
+                for item in &items {
+                    let obj = item.as_object().ok_or("JSON 行不是对象")?;
+                    let row: Vec<Value> = columns
+                        .iter()
+                        .map(|c| obj.get(c).map(json_to_value).unwrap_or(Value::Null))
+                        .collect();
+                    rows.push(row);
+                }
+                Ok((columns, rows))
+            } else {
+                // 形态 2：嵌套数组
+                let mut iter = items.into_iter();
+                let first = iter.next().ok_or("JSON 数组为空")?;
+                let arr = first.as_array().ok_or("JSON 数组首元素不是数组")?;
+                let columns: Vec<String> = arr
+                    .iter()
+                    .map(|v| json_to_value(v).display())
+                    .collect();
+                let mut rows = Vec::new();
+                for item in iter {
+                    let arr = item.as_array().ok_or("JSON 数组元素不是数组")?;
+                    rows.push(arr.iter().map(json_to_value).collect());
+                }
+                Ok((columns, rows))
+            }
+        }
+        // 单个对象：视为只有一行
+        serde_json::Value::Object(obj) => {
+            let columns: Vec<String> = obj.keys().cloned().collect();
+            let row: Vec<Value> = columns
+                .iter()
+                .map(|c| obj.get(c).map(json_to_value).unwrap_or(Value::Null))
+                .collect();
+            Ok((columns, vec![row]))
+        }
+        _ => Err("不支持的 JSON 结构（应为对象数组或嵌套数组）".into()),
+    }
+}
+
+/// JSON 值 → 领域值。
+fn json_to_value(v: &serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(i)
+            } else if let Some(f) = n.as_f64() {
+                Value::Float(f)
+            } else {
+                Value::Text(n.to_string())
+            }
+        }
+        serde_json::Value::String(s) => Value::Text(s.clone()),
+        other => Value::Text(other.to_string()),
+    }
+}
+
+/// 读取 CSV（逗号分隔）。
 fn read_csv(path: &str) -> Result<(Vec<String>, Vec<Vec<Value>>), String> {
+    read_delimited(path, b',')
+}
+
+/// 读取按指定分隔符的文本表（CSV / TSV）。
+fn read_delimited(path: &str, delim: u8) -> Result<(Vec<String>, Vec<Vec<Value>>), String> {
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
+        .delimiter(delim)
         .from_path(path)
         .map_err(|e| e.to_string())?;
     let mut headers: Vec<String> = Vec::new();
@@ -299,4 +393,131 @@ fn read_xlsx(path: &str) -> Result<(Vec<String>, Vec<Vec<Value>>), String> {
         );
     }
     Ok((headers, rows))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbhelper_models::Value;
+
+    struct TempFile(std::path::PathBuf);
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn temp_path(tag: &str, ext: &str) -> TempFile {
+        let path = std::env::temp_dir()
+            .join(format!("dbhelper_export_{tag}_{}.{ext}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        TempFile(path)
+    }
+
+    fn sample_columns() -> Vec<ColumnMeta> {
+        vec![
+            ColumnMeta::new("id", "INTEGER"),
+            ColumnMeta::new("name", "TEXT"),
+            ColumnMeta::new("score", "REAL"),
+        ]
+    }
+
+    fn sample_rows() -> Vec<Row> {
+        vec![
+            vec![Value::Int(1), Value::Text("张三".into()), Value::Float(9.5)],
+            vec![Value::Int(2), Value::Text("李四".into()), Value::Float(8.0)],
+        ]
+    }
+
+    /// 黑盒：CSV 导出 → 重新导入，数据应完整往返。
+    #[tokio::test]
+    async fn csv_export_import_roundtrip() {
+        let f = temp_path("csv_rt", "csv");
+        let written = export(
+            f.0.to_string_lossy().to_string(),
+            ExportFormat::Csv,
+            sample_columns(),
+            sample_rows(),
+            "users".into(),
+        )
+        .await
+        .expect("导出失败");
+        assert_eq!(written, 2);
+
+        let (cols, rows) = read_import_file(f.0.to_string_lossy().to_string())
+            .await
+            .expect("导入失败");
+        assert_eq!(cols, vec!["id", "name", "score"], "列名应完整往返：{cols:?}");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][1].display(), "张三", "中文应原样往返");
+        assert_eq!(rows[1][1].display(), "李四");
+        // 数字应仍被识别为数字（不是文本）
+        assert!(matches!(rows[0][0], Value::Int(_) | Value::Float(_)), "{:?}", rows[0][0]);
+    }
+
+    /// 黑盒：含逗号 / 引号 / 换行的值必须能安全往返（CSV 转义正确）。
+    #[tokio::test]
+    async fn csv_roundtrip_preserves_special_characters() {
+        let f = temp_path("csv_special", "csv");
+        let nasty = "a,b\"c\nd";
+        let rows = vec![vec![Value::Int(1), Value::Text(nasty.into()), Value::Float(1.0)]];
+        export(
+            f.0.to_string_lossy().to_string(),
+            ExportFormat::Csv,
+            sample_columns(),
+            rows,
+            "t".into(),
+        )
+        .await
+        .expect("导出失败");
+
+        let (_, back) = read_import_file(f.0.to_string_lossy().to_string())
+            .await
+            .expect("导入失败");
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0][1].display(), nasty, "含分隔符的值应原样往返");
+    }
+
+    /// 黑盒：JSON 导出 → 导入必须可用（此前 .json 会误走 CSV 分支）。
+    #[tokio::test]
+    async fn json_export_import_roundtrip() {
+        let f = temp_path("json_rt", "json");
+        let written = export(
+            f.0.to_string_lossy().to_string(),
+            ExportFormat::Json,
+            sample_columns(),
+            sample_rows(),
+            "users".into(),
+        )
+        .await
+        .expect("JSON 导出失败");
+        assert_eq!(written, 2);
+
+        let (cols, rows) = read_import_file(f.0.to_string_lossy().to_string())
+            .await
+            .unwrap_or_else(|e| panic!("JSON 导入失败：{e}"));
+        assert_eq!(cols, vec!["id", "name", "score"], "{cols:?}");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0][1].display(), "张三");
+    }
+
+    /// 黑盒：空结果集导出不应崩溃，且应产出只有表头的文件。
+    #[tokio::test]
+    async fn export_empty_result_set_is_safe() {
+        let f = temp_path("empty", "csv");
+        let written = export(
+            f.0.to_string_lossy().to_string(),
+            ExportFormat::Csv,
+            sample_columns(),
+            Vec::new(),
+            "t".into(),
+        )
+        .await
+        .expect("空结果导出不应失败");
+        assert_eq!(written, 0);
+        let (cols, rows) = read_import_file(f.0.to_string_lossy().to_string()).await.unwrap();
+        assert_eq!(cols.len(), 3);
+        assert!(rows.is_empty());
+    }
 }

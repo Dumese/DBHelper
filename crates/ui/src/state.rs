@@ -638,6 +638,7 @@ pub enum Modal {
     None,
     Wizard,
     Export,
+    Import,
     Confirm(Confirm),
     About,
     Shortcuts,

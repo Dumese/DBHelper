@@ -160,7 +160,9 @@ impl App {
                     row_estimate: None,
                     comment: None,
                 };
-                def.columns[0].extra = String::new();
+                if let Some(first) = def.columns.first_mut() {
+                    first.extra = String::new();
+                }
                 self.designer = DesignerState {
                     open: true,
                     conn: Some(conn),
@@ -264,7 +266,7 @@ impl App {
                             if s.is_empty() {
                                 continue;
                             }
-                            if let Err(e) = core.admin_query(conn, s.to_string()).await {
+                            if let Err(e) = core.exec_ddl(conn, s.to_string()).await {
                                 return Err(format!("附加 DDL 执行失败：{}", e));
                             }
                             out.push_str(s);
@@ -299,6 +301,10 @@ impl App {
             // BI 仪表板
             // -----------------------------------------------------------------
             Msg::DashOpen(conn) => {
+                if !self.conns.iter().any(|c| c.id == conn) {
+                    self.toast("请先选择一个连接", Tone::Warning);
+                    return Task::none();
+                }
                 self.dash.conn = Some(conn);
                 self.page = Page::Dash;
                 Task::none()
@@ -471,6 +477,10 @@ impl App {
             // 服务器管理
             // -----------------------------------------------------------------
             Msg::AdminOpen(conn) => {
+                if !self.conns.iter().any(|c| c.id == conn) {
+                    self.toast("请先选择一个连接", Tone::Warning);
+                    return Task::none();
+                }
                 self.admin.conn = Some(conn);
                 self.page = Page::Admin;
                 Task::none()
@@ -521,7 +531,12 @@ impl App {
             // 导入
             // -----------------------------------------------------------------
             Msg::ImportOpen => {
-                self.import = ImportState { open: true, ..Default::default() };
+                // 打开导入向导弹窗；选文件是弹窗内的独立动作
+                self.import.open = true;
+                self.modal = crate::state::Modal::Import;
+                Task::none()
+            }
+            Msg::ImportPickFile => {
                 let Some(core) = self.core.clone() else { return Task::none() };
                 Task::perform(
                     async move {
@@ -603,6 +618,9 @@ impl App {
             }
             Msg::ImportClose => {
                 self.import.open = false;
+                if matches!(self.modal, crate::state::Modal::Import) {
+                    self.modal = crate::state::Modal::None;
+                }
                 Task::none()
             }
 
@@ -699,67 +717,17 @@ impl App {
         (start, end, sql[start..end].to_string())
     }
 
-    /// 轻量 SQL 诊断：括号/引号平衡 + 空语句 + 高危语句提示。
+    /// 轻量 SQL 诊断：括号/引号平衡 + 高危语句提示。
+    ///
+    /// 逻辑实现在 `dbhelper_utils::sql::diagnose`（纯函数，已被单元测试覆盖），
+    /// 这里只做状态同步。
     pub fn run_diagnostics(&mut self) -> Task<Msg> {
         let Some(tab) = self.current_query() else { return Task::none() };
         let sql = tab.sql.clone();
-        let mut diags = Vec::new();
-        let mut depth = 0i32;
-        let mut in_str = false;
-        let mut line = 0usize;
-        let mut line_start = 0usize;
-        for (i, ch) in sql.char_indices() {
-            if ch == '\n' {
-                line += 1;
-                line_start = i + 1;
-                continue;
-            }
-            if in_str {
-                if ch == '\'' {
-                    in_str = false;
-                }
-                continue;
-            }
-            match ch {
-                '\'' => in_str = true,
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth < 0 {
-                        diags.push(Diagnostic {
-                            line,
-                            message: "括号不匹配：多余的 ')'".into(),
-                        });
-                        depth = 0;
-                    }
-                }
-                _ => {}
-            }
-        }
-        if in_str {
-            diags.push(Diagnostic { line, message: "字符串未闭合".into() });
-        }
-        if depth > 0 {
-            diags.push(Diagnostic {
-                line: sql[..line_start.min(sql.len())].lines().count().saturating_sub(1),
-                message: format!("括号未闭合：缺少 {depth} 个 ')'"),
-            });
-        }
-        for (idx, stmt) in dbhelper_utils::sql::split_statements(&sql) {
-            if stmt.trim().is_empty() {
-                continue;
-            }
-            if let Some(danger) = dbhelper_utils::sql::danger_of(stmt.trim()) {
-                if danger.missing_where {
-                    let ln = sql[..idx].matches('\n').count();
-                    diags.push(Diagnostic {
-                        line: ln,
-                        message: "高危：写语句缺少 WHERE 子句".into(),
-                    });
-                }
-            }
-        }
-        self.diagnostics = diags;
+        self.diagnostics = dbhelper_utils::sql::diagnose(&sql)
+            .into_iter()
+            .map(|d| Diagnostic { line: d.line, message: d.message })
+            .collect();
         Task::none()
     }
 
@@ -795,14 +763,25 @@ impl App {
                     .iter()
                     .map(|r| r.first().map(|v| v.display()).unwrap_or_default())
                     .collect();
-                let numeric = (0..out.columns.len())
+                // 数值列：跳过第 0 列（类目列），且要求至少有一个非空值，
+                // 否则「全 NULL 列」会被误判为数值列。
+                let numeric = (1..out.columns.len())
                     .find(|&i| {
-                        out.rows
+                        let vals: Vec<&Value> = out
+                            .rows
                             .iter()
                             .filter_map(|r| r.get(i))
-                            .all(|v| matches!(v, Value::Int(_) | Value::Float(_) | Value::Decimal(_) | Value::Null))
+                            .filter(|v| !v.is_null())
+                            .collect();
+                        !vals.is_empty()
+                            && vals.iter().all(|v| {
+                                matches!(v, Value::Int(_) | Value::Float(_) | Value::Decimal(_))
+                            })
                     })
-                    .unwrap_or(1.min(out.columns.len().saturating_sub(1)));
+                    .unwrap_or_else(|| {
+                        // 退化：取最后一列
+                        out.columns.len().saturating_sub(1)
+                    });
                 let values: Vec<f64> = out
                     .rows
                     .iter()
@@ -844,18 +823,21 @@ impl App {
                 match mode {
                     TransferMode::Structure => {
                         let ddl = core.table_ddl(src, table.clone()).await.map_err(|e| e.to_string())?;
-                        core.admin_query(dst, ddl).await.map_err(|e| e.to_string())?;
+                        // DDL 必须走 execute（admin_query 面向结果集查询）
+                        core.exec_ddl(dst, ddl).await.map_err(|e| e.to_string())?;
                         Ok(())
                     }
                     TransferMode::Data | TransferMode::Copy | TransferMode::Sync => {
                         if mode != TransferMode::Data {
                             // Copy / Sync 也带结构
                             if let Ok(ddl) = core.table_ddl(src, table.clone()).await {
-                                let _ = core.admin_query(dst, ddl).await;
+                                let _ = core.exec_ddl(dst, ddl).await;
                             }
                         }
+                        // 表名做标识符转义，避免拼进 SQL 时被注入
+                        let quoted = dbhelper_utils::sql::quote_table_name(table.as_str());
                         let out = core
-                            .admin_query(src, format!("SELECT * FROM {table}"))
+                            .admin_query(src, format!("SELECT * FROM {quoted}"))
                             .await
                             .map_err(|e| e.to_string())?;
                         let columns: Vec<String> = out.columns.iter().map(|c| c.name.clone()).collect();

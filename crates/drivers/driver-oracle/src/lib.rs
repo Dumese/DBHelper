@@ -492,3 +492,98 @@ impl RelationalDriver for OracleDriver {
         Ok(format!("CREATE TABLE {} (\n{}\n)", quote_ident(DbKind::Oracle, &def.name), cols.join(",\n")))
     }
 }
+
+// ---------------------------------------------------------------------------
+// 写入（行内编辑 / CSV 导入）
+// ---------------------------------------------------------------------------
+//
+// rust-oracle 0.6 未暴露稳定的参数化绑定（execute 的 binds 需要 OCI 侧类型构造，
+// 各类型映射成本高且易错），因此这里渲染为**字面量**：
+// - 标识符：`"name"`，内部 `"` → `""`（Oracle 标准转义）
+// - 字符串：`'text'`，内部 `'` → `''`
+// - 数值 / NULL / 布尔不产生可注入内容。
+
+#[async_trait]
+impl RowWriter for OracleDriver {
+    async fn update_row(
+        &self,
+        table: &str,
+        pk: &[(String, Value)],
+        changes: &[(String, Value)],
+    ) -> DriverResult<u64> {
+        if changes.is_empty() {
+            return Ok(0);
+        }
+        let mut sql = format!("UPDATE {} SET ", oracle_ident(table));
+        for (i, (col, value)) in changes.iter().enumerate() {
+            if i > 0 {
+                sql.push_str(", ");
+            }
+            sql.push_str(&format!("{} = {}", oracle_ident(col), oracle_literal(value)));
+        }
+        sql.push_str(" WHERE ");
+        for (i, (col, value)) in pk.iter().enumerate() {
+            if i > 0 {
+                sql.push_str(" AND ");
+            }
+            sql.push_str(&format!("{} = {}", oracle_ident(col), oracle_literal(value)));
+        }
+        self.execute(&sql, Duration::from_secs(30)).await.map(|o| o.rows_affected)
+    }
+
+    async fn insert_rows(
+        &self,
+        table: &str,
+        columns: &[String],
+        rows: &[Vec<Value>],
+    ) -> DriverResult<u64> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let cols = columns
+            .iter()
+            .map(|c| oracle_ident(c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut sql = format!("INSERT INTO {} ({}) VALUES ", oracle_ident(table), cols);
+        let values: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                let cells: Vec<String> = row.iter().map(oracle_literal).collect();
+                format!("({})", cells.join(", "))
+            })
+            .collect();
+        sql.push_str(&values.join(", "));
+        self.execute(&sql, Duration::from_secs(60)).await.map(|o| o.rows_affected)
+    }
+}
+
+/// Oracle 标识符转义：`"name"`，内部 `"` → `""`。
+fn oracle_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// 渲染为 SQL 字面量。
+fn oracle_literal(value: &Value) -> String {
+    match value {
+        Value::Null => "NULL".into(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => {
+            if f.is_finite() {
+                f.to_string()
+            } else {
+                "NULL".into()
+            }
+        }
+        Value::Bool(b) => if *b { "1" } else { "0" }.into(),
+        Value::Bytes(b) => {
+            let mut s = String::from("HEXTORAW('");
+            for byte in b {
+                s.push_str(&format!("{byte:02X}"));
+            }
+            s.push_str("')");
+            s
+        }
+        other => format!("'{}'", other.display().replace('\'', "''")),
+    }
+}

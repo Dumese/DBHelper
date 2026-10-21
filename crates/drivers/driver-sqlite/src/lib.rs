@@ -708,3 +708,194 @@ fn push_bind<'a>(qb: &mut sqlx::QueryBuilder<'a, sqlx::Sqlite>, value: &'a Value
         }
     }
 }
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use dbhelper_models::{ColumnDef, DbKind, Value};
+    use std::time::Duration;
+
+    /// 构造一个指向临时文件的 SQLite 连接配置。
+    fn temp_config(path: &std::path::Path) -> ConnectionConfig {
+        let mut cfg = ConnectionConfig::new(1, "test-sqlite", DbKind::Sqlite);
+        cfg.database = path.to_string_lossy().to_string();
+        cfg
+    }
+
+    /// 测试结束自动删除临时数据库文件。
+    struct TempDb(std::path::PathBuf);
+
+    impl Drop for TempDb {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn temp_db(tag: &str) -> TempDb {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("dbhelper_test_{tag}_{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        TempDb(path)
+    }
+
+    fn driver_for(path: &std::path::Path) -> SqliteDriver {
+        let d = SqliteDriver::new(temp_config(path));
+        d
+    }
+
+    /// 黑盒：建表 → 插入 → 查询 → 校验。
+    #[tokio::test]
+    async fn create_insert_select_roundtrip() {
+        let tmp = temp_db("roundtrip");
+        let d = driver_for(&tmp.0);
+        d.connect().await.expect("连接失败");
+        d.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER)",
+            Duration::from_secs(10),
+        )
+        .await
+        .expect("建表失败");
+
+        let cols = vec!["id".to_string(), "name".to_string(), "age".to_string()];
+        let rows = vec![
+            vec![Value::Int(1), Value::Text("张三".into()), Value::Int(30)],
+            vec![Value::Int(2), Value::Text("李四".into()), Value::Int(25)],
+        ];
+        let n = d
+            .writer()
+            .expect("sqlite 应支持 RowWriter")
+            .insert_rows("users", &cols, &rows)
+            .await
+            .expect("插入失败");
+        assert_eq!(n, 2, "应插入 2 行");
+
+        let out = d.query("SELECT id, name, age FROM users ORDER BY id", 100, Duration::from_secs(10)).await.expect("查询失败");
+        assert_eq!(out.rows.len(), 2);
+        assert_eq!(out.columns.len(), 3);
+        // 中文必须原样往返（不能出现乱码/截断）
+        assert_eq!(out.rows[0][1].display(), "张三");
+        assert_eq!(out.rows[1][1].display(), "李四");
+        d.close().await;
+    }
+
+    /// 黑盒：行内编辑（UPDATE by PK）生效且只影响目标行。
+    #[tokio::test]
+    async fn update_row_targets_only_pk_row() {
+        let tmp = temp_db("update");
+        let d = driver_for(&tmp.0);
+        d.connect().await.unwrap();
+        d.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", Duration::from_secs(10)).await.unwrap();
+        let cols = vec!["id".to_string(), "v".to_string()];
+        let rows = vec![
+            vec![Value::Int(1), Value::Text("a".into())],
+            vec![Value::Int(2), Value::Text("b".into())],
+        ];
+        d.writer().unwrap().insert_rows("t", &cols, &rows).await.unwrap();
+
+        let affected = d
+            .writer()
+            .unwrap()
+            .update_row(
+                "t",
+                &[("id".to_string(), Value::Int(1))],
+                &[("v".to_string(), Value::Text("changed".into()))],
+            )
+            .await
+            .expect("更新失败");
+        assert_eq!(affected, 1, "只应影响 1 行");
+
+        let out = d.query("SELECT v FROM t ORDER BY id", 10, Duration::from_secs(10)).await.unwrap();
+        assert_eq!(out.rows[0][0].display(), "changed");
+        assert_eq!(out.rows[1][0].display(), "b", "其它行不应被修改");
+        d.close().await;
+    }
+
+    /// 黑盒：单引号等特殊字符必须参数化写入，不能破坏 SQL。
+    #[tokio::test]
+    async fn insert_escapes_quotes_and_unicode() {
+        let tmp = temp_db("escape");
+        let d = driver_for(&tmp.0);
+        d.connect().await.unwrap();
+        d.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", Duration::from_secs(10)).await.unwrap();
+        let cols = vec!["id".to_string(), "v".to_string()];
+        let nasty = "O'Brien \"quote\" 中文 'DROP TABLE t;--";
+        let rows = vec![vec![Value::Int(1), Value::Text(nasty.into())]];
+        d.writer().unwrap().insert_rows("t", &cols, &rows).await.expect("含引号的值应能安全写入");
+
+        let out = d.query("SELECT v FROM t", 10, Duration::from_secs(10)).await.unwrap();
+        assert_eq!(out.rows.len(), 1);
+        assert_eq!(out.rows[0][0].display(), nasty, "值应原样保存");
+        // 表还在（说明没有执行注入语句）
+        let cnt = d.query("SELECT COUNT(*) FROM t", 10, Duration::from_secs(10)).await.unwrap();
+        assert_eq!(cnt.rows[0][0].display(), "1");
+        d.close().await;
+    }
+
+    /// 黑盒：describe_table 返回的列信息可用于对象设计器。
+    #[tokio::test]
+    async fn describe_table_gives_column_metadata() {
+        let tmp = temp_db("describe");
+        let d = driver_for(&tmp.0);
+        d.connect().await.unwrap();
+        d.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, score REAL)",
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+        let def = d.describe_table(None, "users").await.expect("读取表结构失败");
+        assert_eq!(def.name, "users");
+        let names: Vec<&str> = def.columns.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"id"), "{names:?}");
+        assert!(names.contains(&"name"), "{names:?}");
+        assert!(names.contains(&"score"), "{names:?}");
+        // 主键应被识别
+        assert!(def.columns.iter().any(|c| c.is_pk), "应识别出主键列");
+        d.close().await;
+    }
+
+    /// 黑盒：create_table_ddl 生成的语句能被真实执行。
+    #[tokio::test]
+    async fn create_table_ddl_is_executable() {
+        let tmp = temp_db("ddl");
+        let d = driver_for(&tmp.0);
+        d.connect().await.unwrap();
+        let def = TableDef {
+            schema: None,
+            name: "generated".into(),
+            columns: vec![ColumnDef {
+                name: "id".into(),
+                data_type: "INTEGER".into(),
+                nullable: false,
+                default: None,
+                is_pk: true,
+                is_unique: true,
+                fk: None,
+                extra: String::new(),
+                comment: None,
+                ordinal: 1,
+            }],
+            indexes: Vec::new(),
+            row_estimate: None,
+            comment: None,
+        };
+        let ddl = d.create_table_ddl(&def, None).await.expect("生成 DDL 失败");
+        d.execute(&ddl, Duration::from_secs(10)).await.expect("生成的 DDL 应可执行");
+        let out = d.query("SELECT id FROM generated", 10, Duration::from_secs(10)).await.unwrap();
+        assert_eq!(out.columns.len(), 1);
+        d.close().await;
+    }
+
+    /// 黑盒：EXPLAIN 通道可用（执行计划页签的数据来源）。
+    #[tokio::test]
+    async fn explain_returns_plan_rows() {
+        let tmp = temp_db("explain");
+        let d = driver_for(&tmp.0);
+        d.connect().await.unwrap();
+        d.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", Duration::from_secs(10)).await.unwrap();
+        let out = d.explain("SELECT * FROM t").await.expect("EXPLAIN 失败");
+        assert!(!out.columns.is_empty(), "执行计划应返回列信息");
+        assert!(!out.rows.is_empty(), "执行计划应返回行");
+        d.close().await;
+    }
+}

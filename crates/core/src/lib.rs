@@ -487,7 +487,19 @@ impl AppCore {
                 }
                 let mut all = String::new();
                 for stmt in &stmts {
-                    driver.execute(stmt, timeout).await.map_err(|e| CoreError::Message(e.user_message()))?;
+                    if let Err(e) = driver.execute(stmt, timeout).await {
+                        // 部分成功：明确告知已执行到哪一步，避免用户误以为完全没生效
+                        let done = if all.is_empty() {
+                            "（尚未执行任何语句）".to_string()
+                        } else {
+                            format!("已执行：\n{all}")
+                        };
+                        return Err(CoreError::Message(format!(
+                            "变更失败：{}\n{}\n注意：此前的变更已生效。",
+                            e.user_message(),
+                            done
+                        )));
+                    }
                     all.push_str(stmt);
                     all.push_str(";\n");
                 }
@@ -524,6 +536,24 @@ impl AppCore {
         match handle {
             Handle::Rel(driver) => driver.query(&sql, 1000, Duration::from_secs(30)).await.map_err(|e| CoreError::Message(e.user_message())),
             _ => Err(CoreError::Message("该连接类型不支持管理查询".into())),
+        }
+    }
+
+    /// 执行 DDL / 写语句（不期望结果集）。
+    ///
+    /// 与 `admin_query` 的区别：后者走 `query()`（面向结果集查询），
+    /// 用它执行 DDL 在部分驱动上会因「无结果集」报错，故 DDL 必须走 `execute()`。
+    pub async fn exec_ddl(self: &Arc<Self>, conn_id: ConnId, sql: String) -> CoreResult<u64> {
+        let handle = self.ensure_connected(conn_id).await?;
+        match handle {
+            Handle::Rel(driver) => {
+                let out = driver
+                    .execute(&sql, Duration::from_secs(60))
+                    .await
+                    .map_err(|e| CoreError::Message(e.user_message()))?;
+                Ok(out.rows_affected)
+            }
+            _ => Err(CoreError::Message("该连接类型不支持 DDL 执行".into())),
         }
     }
 }

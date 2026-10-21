@@ -232,12 +232,14 @@ pub fn breadcrumb<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         }
     }
 
+    // 未选中连接时，这些入口由 update 侧给出提示，避免误用 id=0 的连接
+    let active = app.active_conn.unwrap_or_default();
     let actions: Element<Msg> = row![
         kit::icon_button(ctx, Icon::Refresh, 12.5, t.text_secondary, Msg::RefreshTree),
-        kit::icon_button(ctx, Icon::Chart, 12.5, t.text_secondary, Msg::DashOpen(app.active_conn.unwrap_or(0))),
+        kit::icon_button(ctx, Icon::Chart, 12.5, t.text_secondary, Msg::DashOpen(active)),
         kit::icon_button(ctx, Icon::Download, 12.5, t.text_secondary, Msg::ImportOpen),
         kit::icon_button(ctx, Icon::Save, 12.5, t.text_secondary, Msg::TransferOpen),
-        kit::icon_button(ctx, Icon::Lock, 12.5, t.text_secondary, Msg::AdminOpen(app.active_conn.unwrap_or(0))),
+        kit::icon_button(ctx, Icon::Lock, 12.5, t.text_secondary, Msg::AdminOpen(active)),
         kit::icon_button(ctx, Icon::More, 12.5, t.text_secondary, Msg::ConnMenu(0)),
     ]
     .spacing(2)

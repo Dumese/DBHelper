@@ -526,3 +526,97 @@ impl MssqlDriver {
             .map_err(|_| DriverError::Timeout(timeout.as_millis() as u64))?
     }
 }
+
+// ---------------------------------------------------------------------------
+// 写入（行内编辑 / CSV 导入）
+// ---------------------------------------------------------------------------
+//
+// 注意：tiberius 0.12 未暴露参数化绑定接口（simple_query 只接受纯 SQL），
+// 因此这里把值渲染为**字面量**。为避免注入，标识符与字符串都经过严格转义：
+// - 标识符：`[` `]` 包裹，内部 `]` 转义为 `]]`
+// - 字符串：`'` 包裹，内部 `'` 转义为 `''`（T-SQL 标准转义）
+// - 其余类型（数值 / NULL / 布尔）不产生可注入内容。
+
+#[async_trait]
+impl RowWriter for MssqlDriver {
+    async fn update_row(
+        &self,
+        table: &str,
+        pk: &[(String, Value)],
+        changes: &[(String, Value)],
+    ) -> DriverResult<u64> {
+        if changes.is_empty() {
+            return Ok(0);
+        }
+        let mut sql = format!("UPDATE {} SET ", mssql_ident(table));
+        for (i, (col, value)) in changes.iter().enumerate() {
+            if i > 0 {
+                sql.push_str(", ");
+            }
+            sql.push_str(&format!("{} = {}", mssql_ident(col), mssql_literal(value)));
+        }
+        sql.push_str(" WHERE ");
+        for (i, (col, value)) in pk.iter().enumerate() {
+            if i > 0 {
+                sql.push_str(" AND ");
+            }
+            sql.push_str(&format!("{} = {}", mssql_ident(col), mssql_literal(value)));
+        }
+        self.execute(&sql, Duration::from_secs(30)).await.map(|o| o.rows_affected)
+    }
+
+    async fn insert_rows(
+        &self,
+        table: &str,
+        columns: &[String],
+        rows: &[Vec<Value>],
+    ) -> DriverResult<u64> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let cols = columns
+            .iter()
+            .map(|c| mssql_ident(c))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut sql = format!("INSERT INTO {} ({}) VALUES ", mssql_ident(table), cols);
+        let values: Vec<String> = rows
+            .iter()
+            .map(|row| {
+                let cells: Vec<String> = row.iter().map(mssql_literal).collect();
+                format!("({})", cells.join(", "))
+            })
+            .collect();
+        sql.push_str(&values.join(", "));
+        self.execute(&sql, Duration::from_secs(60)).await.map(|o| o.rows_affected)
+    }
+}
+
+/// T-SQL 标识符转义：`[name]`，内部 `]` → `]]`。
+fn mssql_ident(name: &str) -> String {
+    format!("[{}]", name.replace(']', "]]"))
+}
+
+/// 渲染为 SQL 字面量。
+fn mssql_literal(value: &Value) -> String {
+    match value {
+        Value::Null => "NULL".into(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => {
+            if f.is_finite() {
+                f.to_string()
+            } else {
+                "NULL".into()
+            }
+        }
+        Value::Bool(b) => if *b { "1" } else { "0" }.into(),
+        Value::Bytes(b) => {
+            let mut s = String::from("0x");
+            for byte in b {
+                s.push_str(&format!("{byte:02X}"));
+            }
+            s
+        }
+        other => format!("'{}'", other.display().replace('\'', "''")),
+    }
+}

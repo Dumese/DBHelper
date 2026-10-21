@@ -250,3 +250,79 @@ impl Tr {
         self.s("匹配键名 *profile", "Match key name *profile")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbhelper_models::Language;
+
+    /// 所有文案方法在两种语言下都必须返回非空且**不同**的字符串，
+    /// 否则「切换语言」在界面上不会有任何可见变化。
+    const KEYS: &[(&str, fn(&Tr) -> &'static str)] = &[
+        ("settings", |t| t.settings()),
+        ("settings_sub", |t| t.settings_sub()),
+        ("display_config", |t| t.display_config()),
+        ("normal_config", |t| t.normal_config()),
+        ("file_config", |t| t.file_config()),
+        ("color_mode", |t| t.color_mode()),
+        ("light", |t| t.light()),
+        ("dark", |t| t.dark()),
+        ("language", |t| t.language()),
+        ("editor_font", |t| t.editor_font()),
+        ("ui_font", |t| t.ui_font()),
+        ("sans", |t| t.sans()),
+        ("serif", |t| t.serif()),
+        ("font_size", |t| t.font_size()),
+        ("show_line_numbers", |t| t.show_line_numbers()),
+        ("auto_wrap", |t| t.auto_wrap()),
+        ("syntax_highlight", |t| t.syntax_highlight()),
+        ("bracket_highlight", |t| t.bracket_highlight()),
+        ("log_location", |t| t.log_location()),
+        ("config_location", |t| t.config_location()),
+        ("export_wizard", |t| t.export_wizard()),
+        ("open_export_wizard", |t| t.open_export_wizard()),
+        ("browse", |t| t.browse()),
+        ("connections", |t| t.connections()),
+        ("all_connections", |t| t.all_connections()),
+        ("query", |t| t.query()),
+        ("data", |t| t.data()),
+        ("design", |t| t.design()),
+        ("er_diagram", |t| t.er_diagram()),
+        ("documents", |t| t.documents()),
+        ("monitor", |t| t.monitor()),
+        ("server", |t| t.server()),
+        ("table", |t| t.table()),
+        ("view", |t| t.view()),
+        ("key", |t| t.key()),
+        ("index", |t| t.index()),
+        ("keyspace", |t| t.keyspace()),
+        ("collections", |t| t.collections()),
+        ("vault_encrypted", |t| t.vault_encrypted()),
+        ("initializing", |t| t.initializing()),
+        ("memory", |t| t.memory()),
+        ("encrypted", |t| t.encrypted()),
+        ("search_conns", |t| t.search_conns()),
+        ("search_keys", |t| t.search_keys()),
+    ];
+
+    #[test]
+    fn every_key_translates_and_differs_between_languages() {
+        let zh = Tr::new(Language::ZhCn);
+        let en = Tr::new(Language::EnUs);
+        for (name, f) in KEYS {
+            let z = f(&zh);
+            let e = f(&en);
+            assert!(!z.is_empty(), "{name} 中文为空");
+            assert!(!e.is_empty(), "{name} 英文为空");
+            assert_ne!(z, e, "{name} 中英文相同，切换语言将看不出变化");
+        }
+    }
+
+    #[test]
+    fn zh_is_chinese_and_en_is_ascii() {
+        let zh = Tr::new(Language::ZhCn);
+        let en = Tr::new(Language::EnUs);
+        assert!(zh.settings().chars().any(|c| c as u32 > 0x2E80));
+        assert!(en.settings().chars().all(|c| c.is_ascii()));
+    }
+}

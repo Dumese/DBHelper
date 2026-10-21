@@ -367,6 +367,7 @@ pub enum Msg {
 
     // 导入
     ImportOpen,
+    ImportPickFile,
     ImportFilePicked(Option<String>),
     ImportLoaded(Result<(Vec<String>, Vec<Vec<Value>>, String), String>),
     ImportTable(String),

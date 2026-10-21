@@ -15,6 +15,7 @@ pub fn modal<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
     let content: Element<Msg> = match &app.modal {
         Modal::Wizard => wizard(app, ctx),
         Modal::Export => export_wizard(app, ctx),
+        Modal::Import => crate::view::features::import_panel(app, ctx),
         Modal::Confirm(c) => confirm(ctx, c),
         _ => Space::new().width(0).height(0).into(),
     };

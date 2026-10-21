@@ -102,38 +102,15 @@ pub fn view<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
 }
 
 /// 敏感列脱敏：手机号 / 邮箱 / 身份证 / 密码类列名打码。
+/// 判定与打码规则由 `dbhelper_utils::sql` 提供（已被单元测试覆盖）。
 pub fn mask_cell(col: &str, v: &dbhelper_models::Value) -> dbhelper_models::Value {
     use dbhelper_models::Value;
-    let key = col.to_lowercase();
-    let sensitive = key.contains("phone")
-        || key.contains("mobile")
-        || key.contains("手机")
-        || key.contains("email")
-        || key.contains("mail")
-        || key.contains("id_card")
-        || key.contains("idcard")
-        || key.contains("身份证")
-        || key.contains("password")
-        || key.contains("passwd")
-        || key.contains("pwd")
-        || key.contains("secret")
-        || key.contains("token");
-    if !sensitive {
+    if !dbhelper_utils::sql::is_sensitive_column(col) {
         return v.clone();
     }
     match v {
         Value::Null => Value::Null,
-        other => {
-            let s = other.display();
-            let chars: Vec<char> = s.chars().collect();
-            let n = chars.len();
-            if n <= 2 {
-                return Value::Text("*".repeat(n.max(1)));
-            }
-            let head: String = chars.iter().take(2).collect();
-            let tail: String = chars.iter().skip(n.saturating_sub(2)).collect();
-            Value::Text(format!("{head}****{tail}"))
-        }
+        other => Value::Text(dbhelper_utils::sql::mask_value(&other.display())),
     }
 }
 

@@ -602,3 +602,109 @@ impl RelationalDriver for MysqlDriver {
         ))
     }
 }
+
+// ---------------------------------------------------------------------------
+// 参数化写入（行内编辑 / CSV 导入）
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl RowWriter for MysqlDriver {
+    async fn update_row(
+        &self,
+        table: &str,
+        pk: &[(String, Value)],
+        changes: &[(String, Value)],
+    ) -> DriverResult<u64> {
+        if changes.is_empty() {
+            return Ok(0);
+        }
+        let pool = self.pool().await?;
+        let mut qb = sqlx::QueryBuilder::<sqlx::MySql>::new("UPDATE ");
+        qb.push(format!("`{}` SET ", table.replace('`', "``")));
+        for (i, (col, value)) in changes.iter().enumerate() {
+            if i > 0 {
+                qb.push(", ");
+            }
+            qb.push(format!("`{}` = ", col.replace('`', "``")));
+            push_bind(&mut qb, value);
+        }
+        qb.push(" WHERE ");
+        for (i, (col, value)) in pk.iter().enumerate() {
+            if i > 0 {
+                qb.push(" AND ");
+            }
+            qb.push(format!("`{}` = ", col.replace('`', "``")));
+            push_bind(&mut qb, value);
+        }
+        let res = qb
+            .build()
+            .execute(&pool)
+            .await
+            .map_err(|e| DriverError::Query(e.to_string()))?;
+        Ok(res.rows_affected())
+    }
+
+    async fn insert_rows(
+        &self,
+        table: &str,
+        columns: &[String],
+        rows: &[Vec<Value>],
+    ) -> DriverResult<u64> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let pool = self.pool().await?;
+        let mut qb = sqlx::QueryBuilder::<sqlx::MySql>::new("INSERT INTO ");
+        qb.push(format!("`{}` (", table.replace('`', "``")));
+        for (i, col) in columns.iter().enumerate() {
+            if i > 0 {
+                qb.push(", ");
+            }
+            qb.push(format!("`{}`", col.replace('`', "``")));
+        }
+        qb.push(") VALUES ");
+        for (ri, row) in rows.iter().enumerate() {
+            if ri > 0 {
+                qb.push(", ");
+            }
+            qb.push("(");
+            for (ci, value) in row.iter().enumerate() {
+                if ci > 0 {
+                    qb.push(", ");
+                }
+                push_bind(&mut qb, value);
+            }
+            qb.push(")");
+        }
+        let res = qb
+            .build()
+            .execute(&pool)
+            .await
+            .map_err(|e| DriverError::Query(e.to_string()))?;
+        Ok(res.rows_affected())
+    }
+}
+
+/// 按值类型绑定参数（NULL / 数值 / 文本 / 布尔 / 字节）。
+fn push_bind<'a>(qb: &mut sqlx::QueryBuilder<'a, sqlx::MySql>, value: &'a Value) {
+    match value {
+        Value::Null => {
+            qb.push_bind(Option::<String>::None);
+        }
+        Value::Int(i) => {
+            qb.push_bind(*i);
+        }
+        Value::Float(f) => {
+            qb.push_bind(*f);
+        }
+        Value::Decimal(s) | Value::Text(s) | Value::Timestamp(s) | Value::Json(s) => {
+            qb.push_bind(s.clone());
+        }
+        Value::Bool(b) => {
+            qb.push_bind(*b);
+        }
+        Value::Bytes(b) => {
+            qb.push_bind(b.clone());
+        }
+    }
+}

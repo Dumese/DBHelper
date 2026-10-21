@@ -640,7 +640,7 @@ pub fn import_panel<'a>(app: &'a App, ctx: Ctx) -> Element<'a, Msg> {
         kit::txt(ctx, "支持 CSV / JSON / TSV / XLSX，导入前预览 100 行。", ts::SMALL, t.text_secondary),
         Space::new().width(Length::Fill).height(Length::Fixed(10.0)),
         row![
-            kit::secondary(ctx, "选择文件…", Msg::ImportOpen),
+            kit::secondary(ctx, "选择文件…", Msg::ImportPickFile),
             kit::txt(ctx, im.path.clone(), ts::MICRO, t.text_tertiary),
         ]
         .spacing(8)
